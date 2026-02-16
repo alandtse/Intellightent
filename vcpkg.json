@@ -1,0 +1,9 @@
+{
+  "name": "intellightent",
+  "version": "1.0.0",
+  "description": "SKSE plugin to manage shadow casting lights in Skyrim SE",
+  "license": "GPL-3.0-or-later",
+  "homepage": "https://github.com/alandtse/Intellightent",
+  "dependencies": ["exprtk"],
+  "builtin-baseline": "2e1caaee2dd0d06b100ae751b6bf309ea95a13b1"
+}
