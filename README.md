@@ -40,6 +40,16 @@ This project uses [xmake](https://xmake.io/) for building.
 
     The build artifacts will be located in the `build` directory.
 
+### Auto Deploy
+
+Set the `SkyrimPluginTargets` environment variable to automatically copy the DLL and PDB to one or more destinations after each build. Separate multiple paths with `;`.
+
+```sh
+SkyrimPluginTargets=C:\Skyrim;D:\MO2\mods\Intellightent
+```
+
+Each path has `\SKSE\Plugins` appended automatically.
+
 ## Configuration
 
 The plugin can be configured via `Data/SKSE/Plugins/Intellightent.ini` or `Data/SKSE/Plugins/Intellightent.user.ini`.
@@ -48,7 +58,7 @@ The plugin can be configured via `Data/SKSE/Plugins/Intellightent.ini` or `Data/
 | :----------------- | :-------- | :--------------------------------------------- |
 | `iLightCount`      | `4`       | Number of shadow casting lights allowed.       |
 | `bTryNormalLight`  | `true`    | Convert excess shadow lights to normal lights. |
-| `iMaxConvertCount` | `12`      | Maximum number of lights to convert per frame. |
+| `iMaxConvertCount` | `32`      | Maximum number of lights to convert per frame. |
 | `sScoreFormula`    | _see src_ | Formula to determine light priority.           |
 
 ## License
