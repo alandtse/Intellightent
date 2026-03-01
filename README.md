@@ -25,11 +25,17 @@ This project uses [xmake](https://xmake.io/) for building.
 
 ### Building
 
-1.  Clone the repository:
+1.  Clone the repository (including submodules):
 
     ```sh
-    git clone https://github.com/alandtse/Intellightent.git
+    git clone --recurse-submodules https://github.com/alandtse/Intellightent.git
     cd Intellightent
+    ```
+
+    If you already cloned without `--recurse-submodules`, run:
+
+    ```sh
+    git submodule update --init --recursive
     ```
 
 2.  Configure and build:
