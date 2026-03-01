@@ -39,8 +39,7 @@ add_packages("exprtk")
 -- set DLL output name
 set_basename("intellightent-ng")
 
--- always generate PDB
-add_cxflags("/Zi", "/FS", {force = true})
+-- generate PDB (releasedbg handles /Zi; /DEBUG tells linker to emit PDB for the DLL)
 add_shflags("/DEBUG", {force = true})
 
 -- version config vars
