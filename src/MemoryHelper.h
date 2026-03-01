@@ -181,7 +181,11 @@ struct MemoryHelper
 	template <typename... Args>
 	static std::string Format(std::string_view str, Args&&... args)
 	{
-		return std::vformat(str, std::make_format_args(std::forward<Args>(args)...));
+		auto store = std::make_tuple(std::forward<Args>(args)...);
+		return std::apply([&](auto&... a) {
+			return std::vformat(str, std::make_format_args(a...));
+		},
+			store);
 	}
 
 	/// <summary>

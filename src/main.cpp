@@ -1,8 +1,6 @@
-#include "Version.h"
-
-#define PLUGIN_VER INTELLIGHTENT_VERSION_MAJOR
+#define PLUGIN_VER 2
 //#define PLUGIN_DEBUG
-#define PLUGIN_NAME "Intellightent"
+#define PLUGIN_NAME "intellightent-ng"
 #define ESP_NAME "intellightent.esp"
 
 struct settings
@@ -12,8 +10,9 @@ struct settings
 		iDebugMode = 0;
 		iLightCount = 4;
 		bTryNormalLight = true;
-		iMaxConvertCount = 12;
-		sScoreFormula = "lightradius * lightintensity / (1 + lightdistance / 1000) * (1 + lightchosenlastframe * 0.3)";
+		iMaxConvertCount = 32;
+		sScoreFormula = "lightradius * lightintensity / (1 + ((1 - lightneverfades) * lightdistance) / 1000) * (1 + lightchosenlastframe * 0.3)";
+		//sAllowConvert = "";
 	}
 
 	static inline int         iDebugMode;
@@ -21,6 +20,7 @@ struct settings
 	static inline bool        bTryNormalLight;
 	static inline int         iMaxConvertCount;
 	static inline std::string sScoreFormula;
+	static inline std::string sAllowConvert;
 
 private:
 	struct map_helper_base
@@ -80,6 +80,7 @@ public:
 		vec.push_back(new map_helper_b{ section, "bTryNormalLight", &bTryNormalLight });
 		vec.push_back(new map_helper_i{ section, "iMaxConvertCount", &iMaxConvertCount });
 		vec.push_back(new map_helper_s{ section, "sScoreFormula", &sScoreFormula });
+		vec.push_back(new map_helper_s{ section, "sAllowConvert", &sAllowConvert });
 
 		store->Load();
 
@@ -158,9 +159,9 @@ private:
 
 uint8_t GAME_VER = 0;
 
-FormulaHelper* g_formula = nullptr;
+FormulaHelper* g_formulaLightScore = nullptr;
+FormulaHelper* g_formulaAllowConvert = nullptr;
 
-const int32_t                   MAX_FRAME_CONVERT = 16;
 std::vector<RE::BSShadowLight*> g_frameConvert;
 uint64_t                        g_lastFrameChosen[4]{ 0, 0, 0, 0 };
 
@@ -182,9 +183,17 @@ struct plugin
 		else
 			return "game version is not supported";
 
-		g_formula = new FormulaHelper();
-		if (!g_formula->Parse(settings::sScoreFormula))
-			return "failed to parse score formula";
+		if (!settings::sScoreFormula.empty()) {
+			g_formulaLightScore = new FormulaHelper();
+			if (!g_formulaLightScore->Parse(settings::sScoreFormula))
+				return "failed to parse light score formula";
+		}
+
+		if (!settings::sAllowConvert.empty()) {
+			g_formulaAllowConvert = new FormulaHelper();
+			if (!g_formulaAllowConvert->Parse(settings::sAllowConvert))
+				return "failed to parse allowConvert formula";
+		}
 
 		if (!Hook_Calculate())
 			return "failed at Hook_Calculate";
@@ -430,7 +439,7 @@ private:
 		}
 
 		int c = (int)g_frameConvert.size();
-		if (c >= MAX_FRAME_CONVERT || c >= settings::iMaxConvertCount)
+		if (c >= settings::iMaxConvertCount)
 			return -1;
 
 		OnDecidedToConvert(light, camera, shadowSceneNode, true);
@@ -566,6 +575,13 @@ private:
 			ApplyLensFlare(light);
 	}
 
+	struct _tmp_l
+	{
+		RE::BSShadowLight* bslight;
+		double             score;
+		double             allowConvert;
+	};
+
 	static void CalculateActiveShadowCasterLights()
 	{
 		auto shadowSceneNode = GetShadowSceneNode();
@@ -619,7 +635,7 @@ private:
 		int32_t thisFrameIndex = 0;
 
 		if (shadowSceneNode->GetRuntimeData().activeShadowLights.size() > 0) {
-			std::vector<std::pair<RE::BSShadowLight*, double>> vec;
+			std::vector<_tmp_l> vec;
 
 			SetupSceneFormula(worldCamera, shadowSceneNode);
 
@@ -629,7 +645,12 @@ private:
 				if (!l)
 					continue;
 
-				vec.push_back(std::make_pair(l, CalculateLightScore(l, worldCamera, tmpIndex++, shadowSceneNode)));
+				auto& e = vec.emplace_back();
+				e.bslight = l;
+				e.score = CalculateLightScore(l, worldCamera, tmpIndex++, shadowSceneNode);
+				e.allowConvert = 1.0;
+				if (g_formulaAllowConvert)
+					e.allowConvert = g_formulaAllowConvert->Calculate();
 			}
 			std::sort(vec.begin(), vec.end(), _SortFunc);
 
@@ -644,7 +665,7 @@ private:
 				debugConvert = (int)data->DebugForceConvert->value;
 
 			for (auto itr = vec.begin(); itr != vec.end(); itr++) {
-				auto                    l = itr->first;
+				auto                    l = itr->bslight;
 				RE::BSCullingProcess*   cull;
 				RE::BSPortalGraphEntry* portal;
 				if (doneLightCount < settings::iLightCount && debugConvert <= 0 && l->SetFrameCamera(*worldCamera) && (cull = l->GetRuntimeData().shadowmapDescriptors.front().cullingProcess) != nullptr && (portal = cull->portalGraphEntry) != nullptr && unk_BSPortalGraphEntry_func2(GetUnknownGlobalCullingProcess()->portalGraphEntry, portal)) {
@@ -653,7 +674,7 @@ private:
 
 					if (thisFrameIndex < 4)
 						g_lastFrameChosen[thisFrameIndex++] = (uint64_t)l;
-				} else if (settings::bTryNormalLight && debugConvert >= 0 && doneLightCount >= settings::iLightCount && l->SetFrameCamera(*worldCamera) && (cull = l->GetRuntimeData().shadowmapDescriptors.front().cullingProcess) != nullptr && (portal = cull->portalGraphEntry) != nullptr && unk_BSPortalGraphEntry_func2(GetUnknownGlobalCullingProcess()->portalGraphEntry, portal)) {
+				} else if (settings::bTryNormalLight && debugConvert >= 0 && doneLightCount >= settings::iLightCount && itr->allowConvert >= 0.5 && l->SetFrameCamera(*worldCamera) && (cull = l->GetRuntimeData().shadowmapDescriptors.front().cullingProcess) != nullptr && (portal = cull->portalGraphEntry) != nullptr && unk_BSPortalGraphEntry_func2(GetUnknownGlobalCullingProcess()->portalGraphEntry, portal)) {
 					int converted = addFrameConvert(l, worldCamera, shadowSceneNode);
 					if (converted >= 0) {
 						// this is now done in addFrameConvert
@@ -676,42 +697,36 @@ private:
 		*GetLastFrameActiveShadowCasterLightCount1() = (uint32_t)doneLightCount;
 	}
 
-	static bool _SortFunc(const std::pair<RE::BSShadowLight*, double>& first, const std::pair<RE::BSShadowLight*, double>& second)
+	static bool _SortFunc(const _tmp_l& first, const _tmp_l& second)
 	{
-		return first.second > second.second;
+		return first.score > second.score;
 	}
 
 	static void SetupSceneFormula(RE::NiCamera* camera, RE::ShadowSceneNode* shadowSceneNode)
 	{
-		if (!g_formula)
-			return;
+		FormulaHelper::SetParam(FormulaParams::kFormulaParam_CameraX, camera->world.translate.x);
+		FormulaHelper::SetParam(FormulaParams::kFormulaParam_CameraY, camera->world.translate.y);
+		FormulaHelper::SetParam(FormulaParams::kFormulaParam_CameraZ, camera->world.translate.z);
 
-		g_formula->SetParam(FormulaParams::kFormulaParam_CameraX, camera->world.translate.x);
-		g_formula->SetParam(FormulaParams::kFormulaParam_CameraY, camera->world.translate.y);
-		g_formula->SetParam(FormulaParams::kFormulaParam_CameraZ, camera->world.translate.z);
-
-		g_formula->SetParam(FormulaParams::kFormulaParam_IsInterior, 0);
+		FormulaHelper::SetParam(FormulaParams::kFormulaParam_IsInterior, 0);
 
 		auto plr = RE::PlayerCharacter::GetSingleton();
 		if (plr) {
 			auto cell = plr->parentCell;
 			if (cell && cell->IsInteriorCell())
-				g_formula->SetParam(FormulaParams::kFormulaParam_IsInterior, 1);
+				FormulaHelper::SetParam(FormulaParams::kFormulaParam_IsInterior, 1);
 		}
 
 		auto a = get();
 		if (a) {
 			if (a->_gamedata.GameHour)
-				g_formula->SetParam(FormulaParams::kFormulaParam_TimeOfDay, a->_gamedata.GameHour->value);
+				FormulaHelper::SetParam(FormulaParams::kFormulaParam_TimeOfDay, a->_gamedata.GameHour->value);
 		}
 	}
 
 	static void SetupLightFormula(RE::BSShadowLight* light, RE::NiCamera* camera, RE::ShadowSceneNode* shadowSceneNode, int32_t index)
 	{
-		if (!g_formula)
-			return;
-
-		g_formula->SetParam(FormulaParams::kFormulaParam_LightIndex, index);
+		FormulaHelper::SetParam(FormulaParams::kFormulaParam_LightIndex, index);
 
 		double chosenLastFrame = 0.0;
 		for (int i = 0; i < 4; i++) {
@@ -720,46 +735,49 @@ private:
 				break;
 			}
 		}
-		g_formula->SetParam(FormulaParams::kFormulaParam_LightChosenLastFrame, chosenLastFrame);
+		FormulaHelper::SetParam(FormulaParams::kFormulaParam_LightChosenLastFrame, chosenLastFrame);
+
+		FormulaHelper::SetParam(FormulaParams::kFormulaParam_LightNeverFades, light->neverFades ? 0.0 : 1.0);  // this declaration is backwards in commonlib, neverFades false means actually never fades
+		FormulaHelper::SetParam(FormulaParams::kFormulaParam_LightPortalStrict, light->portalStrict ? 1.0 : 0.0);
 
 		float x, y, z;
 
 		auto nilight = light->light.get();
 		if (nilight) {
-			g_formula->SetParam(FormulaParams::kFormulaParam_LightIntensity, nilight->GetLightRuntimeData().fade);
-			g_formula->SetParam(FormulaParams::kFormulaParam_LightRadius, nilight->GetLightRuntimeData().radius.x);
-			g_formula->SetParam(FormulaParams::kFormulaParam_LightR, nilight->GetLightRuntimeData().diffuse.red);
-			g_formula->SetParam(FormulaParams::kFormulaParam_LightG, nilight->GetLightRuntimeData().diffuse.green);
-			g_formula->SetParam(FormulaParams::kFormulaParam_LightB, nilight->GetLightRuntimeData().diffuse.blue);
-			g_formula->SetParam(FormulaParams::kFormulaParam_LightAmbientR, nilight->GetLightRuntimeData().ambient.red);
-			g_formula->SetParam(FormulaParams::kFormulaParam_LightAmbientG, nilight->GetLightRuntimeData().ambient.green);
-			g_formula->SetParam(FormulaParams::kFormulaParam_LightAmbientB, nilight->GetLightRuntimeData().ambient.blue);
+			FormulaHelper::SetParam(FormulaParams::kFormulaParam_LightIntensity, nilight->GetLightRuntimeData().fade);
+			FormulaHelper::SetParam(FormulaParams::kFormulaParam_LightRadius, nilight->GetLightRuntimeData().radius.x);
+			FormulaHelper::SetParam(FormulaParams::kFormulaParam_LightR, nilight->GetLightRuntimeData().diffuse.red);
+			FormulaHelper::SetParam(FormulaParams::kFormulaParam_LightG, nilight->GetLightRuntimeData().diffuse.green);
+			FormulaHelper::SetParam(FormulaParams::kFormulaParam_LightB, nilight->GetLightRuntimeData().diffuse.blue);
+			FormulaHelper::SetParam(FormulaParams::kFormulaParam_LightAmbientR, nilight->GetLightRuntimeData().ambient.red);
+			FormulaHelper::SetParam(FormulaParams::kFormulaParam_LightAmbientG, nilight->GetLightRuntimeData().ambient.green);
+			FormulaHelper::SetParam(FormulaParams::kFormulaParam_LightAmbientB, nilight->GetLightRuntimeData().ambient.blue);
 			x = nilight->world.translate.x;
 			y = nilight->world.translate.y;
 			z = nilight->world.translate.z;
 		} else {
-			g_formula->SetParam(FormulaParams::kFormulaParam_LightIntensity, 0.0f);
-			g_formula->SetParam(FormulaParams::kFormulaParam_LightRadius, 0.0f);
-			g_formula->SetParam(FormulaParams::kFormulaParam_LightR, 1.0f);
-			g_formula->SetParam(FormulaParams::kFormulaParam_LightG, 1.0f);
-			g_formula->SetParam(FormulaParams::kFormulaParam_LightB, 1.0f);
-			g_formula->SetParam(FormulaParams::kFormulaParam_LightAmbientR, 1.0f);
-			g_formula->SetParam(FormulaParams::kFormulaParam_LightAmbientG, 1.0f);
-			g_formula->SetParam(FormulaParams::kFormulaParam_LightAmbientB, 1.0f);
+			FormulaHelper::SetParam(FormulaParams::kFormulaParam_LightIntensity, 0.0f);
+			FormulaHelper::SetParam(FormulaParams::kFormulaParam_LightRadius, 0.0f);
+			FormulaHelper::SetParam(FormulaParams::kFormulaParam_LightR, 1.0f);
+			FormulaHelper::SetParam(FormulaParams::kFormulaParam_LightG, 1.0f);
+			FormulaHelper::SetParam(FormulaParams::kFormulaParam_LightB, 1.0f);
+			FormulaHelper::SetParam(FormulaParams::kFormulaParam_LightAmbientR, 1.0f);
+			FormulaHelper::SetParam(FormulaParams::kFormulaParam_LightAmbientG, 1.0f);
+			FormulaHelper::SetParam(FormulaParams::kFormulaParam_LightAmbientB, 1.0f);
 			x = light->worldTranslate.x;  // these appear to be 0 always?
 			y = light->worldTranslate.y;
 			z = light->worldTranslate.z;
 		}
 
-		g_formula->SetParam(FormulaParams::kFormulaParam_LightX, x);
-		g_formula->SetParam(FormulaParams::kFormulaParam_LightY, y);
-		g_formula->SetParam(FormulaParams::kFormulaParam_LightZ, z);
+		FormulaHelper::SetParam(FormulaParams::kFormulaParam_LightX, x);
+		FormulaHelper::SetParam(FormulaParams::kFormulaParam_LightY, y);
+		FormulaHelper::SetParam(FormulaParams::kFormulaParam_LightZ, z);
 
 		float dx = x - camera->world.translate.x;
 		float dy = y - camera->world.translate.y;
 		float dz = z - camera->world.translate.z;
 		float dist = sqrtf(dx * dx + dy * dy + dz * dz);
-		g_formula->SetParam(FormulaParams::kFormulaParam_LightDistance, dist);
+		FormulaHelper::SetParam(FormulaParams::kFormulaParam_LightDistance, dist);
 	}
 
 	static double CalculateLightScore(RE::BSShadowLight* light, RE::NiCamera* camera, int32_t index, RE::ShadowSceneNode* shadowSceneNode)
@@ -807,8 +825,8 @@ private:
 
 		SetupLightFormula(light, camera, shadowSceneNode, index);
 
-		if (g_formula)
-			return g_formula->Calculate();
+		if (g_formulaLightScore)
+			return g_formulaLightScore->Calculate();
 
 		return 0.0;
 	}

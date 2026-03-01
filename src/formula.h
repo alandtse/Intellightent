@@ -16,6 +16,8 @@ enum FormulaParams
 	kFormulaParam_LightAmbientG,
 	kFormulaParam_LightAmbientB,
 	kFormulaParam_LightChosenLastFrame,
+	kFormulaParam_LightNeverFades,
+	kFormulaParam_LightPortalStrict,
 
 	kFormulaParam_CameraX,
 	kFormulaParam_CameraY,
@@ -31,11 +33,10 @@ struct FormulaHelper
 	FormulaHelper();
 	~FormulaHelper();
 
-	bool   Parse(const std::string& input);
-	double Calculate();
-	void   SetParam(int32_t index, double value);
+	bool        Parse(const std::string& input);
+	double      Calculate();
+	static void SetParam(int32_t index, double value);
 
 private:
-	double* _params;
-	void*   _ptr;
+	void* _ptr;
 };

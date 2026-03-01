@@ -11,7 +11,7 @@ includes("lib/commonlibsse-ng")
 set_project("Intellightent")
 set_license("GPL-3.0")
 
-local version = "1.0.0"
+local version = "2.0.0"
 local ver = version:split("%.")
 set_version(version)
 
