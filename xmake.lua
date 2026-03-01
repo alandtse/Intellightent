@@ -24,6 +24,7 @@ set_policy("package.requires_lock", true)
 
 -- add rules
 add_rules("mode.debug", "mode.releasedbg")
+set_defaultmode("releasedbg")
 add_rules("plugin.vsxmake.autoupdate")
 
 -- add packages
@@ -37,6 +38,10 @@ add_packages("exprtk")
 
 -- set DLL output name
 set_basename("intellightent-ng")
+
+-- always generate PDB
+add_cxflags("/Zi", "/FS", {force = true})
+add_shflags("/DEBUG", {force = true})
 
 -- version config vars
 set_configvar("VERSION_MAJOR", tonumber(ver[1]))
@@ -65,7 +70,7 @@ after_build(function(target)
         return
     end
     local dll = target:targetfile()
-    local pdb = path.join(path.directory(dll), path.basename(dll) .. ".pdb")
+    local pdb = target:symbolfile()
     for _, dir in ipairs(deploy_dirs:split(";")) do
         dir = dir:trim()
         if dir ~= "" then
