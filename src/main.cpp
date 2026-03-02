@@ -178,8 +178,8 @@ struct plugin
 			GAME_VER = 0;
 		else if (REL::Module::IsAE())
 			GAME_VER = 1;
-		/*else if (REL::Module::IsVR())
-			GAME_VER = 2;*/
+		else if (REL::Module::IsVR())
+			GAME_VER = 0;
 		else
 			return "game version is not supported";
 
@@ -252,70 +252,92 @@ private:
 	static RE::ShadowSceneNode* GetShadowSceneNode()
 	{
 		// 141E33F40
-		static REL::VariantID uid(513211, 390951, 0);
+		static REL::RelocationID uid(513211, 390951);
 		return *((RE::ShadowSceneNode**)uid.address());
 	}
 
 	static RE::SceneGraph* GetWorldSceneGraph()
 	{
 		// 143258B48
-		static REL::VariantID uid(528087, 415032, 0);
+		static REL::RelocationID uid(528087, 415032);
 		return *((RE::SceneGraph**)uid.address());
+	}
+
+	static bool GetVRDrawShadowsDisplay()
+	{
+		// VR only 141ed3cb0
+		static REL::Offset uid{ 0x1ed3cb0 };
+		return *((bool*)uid.address());
+	}
+
+	static bool GetVRbAccumulateShadowMapsFirst()
+	{
+		// VR only 141ed3cb0
+		static REL::Offset uid{ 0x1ed4118 };
+		return *((bool*)uid.address());
+	}
+
+	static void ApplyAccmulateShadowMaps2(RE::BSLight* light)
+	{
+		// VR only 141357450
+		using func_t = decltype(&ApplyAccmulateShadowMaps2);
+		static REL::Relocation<func_t> func{ REL::Offset(0x1357450) };
+		func(light);
 	}
 
 	static bool GetUnknownSunBool1()
 	{
 		// 141E33EB3
-		static REL::VariantID uid(513201, 390932, 0);
+		static REL::RelocationID uid(513201, 390932);
 		return *((bool*)uid.address());
 	}
 
 	static int GetUnknownSunInt1()
 	{
 		// 1431F6648
-		static REL::VariantID uid(527703, 414625, 0);
+		static REL::RelocationID uid(527703, 414625);
 		return *((int*)uid.address());
 	}
 
 	static bool GetUnknownSunBool2()
 	{
 		// 143258B71
-		static REL::VariantID uid(528095, 415040, 0);
+		static REL::RelocationID uid(528095, 415040);
 		return *((bool*)uid.address());
 	}
 
 	static bool* GetSelectedFocusShadows()
 	{
 		// 143258B72
-		static REL::VariantID uid(528096, 415041, 0);
+		static REL::RelocationID uid(528096, 415041);
 		return (bool*)uid.address();
 	}
 
 	static uint64_t* GetUnknownSunPointer1()
 	{
 		// 1432A9210
-		static REL::VariantID uid(528315, 415267, 0);
+		static REL::RelocationID uid(528315, 415267);
 		return (uint64_t*)uid.address();
 	}
 
 	static uint32_t* GetLastFrameActiveShadowCasterLightCount1()
 	{
 		// 143258B60
-		static REL::VariantID uid(528090, 415035, 0);
+		static REL::RelocationID uid(528090, 415035);
 		return (uint32_t*)uid.address();
 	}
 
 	static uint32_t* GetLastFrameActiveShadowCasterLightCount2()
 	{
 		// 143258B64
-		static REL::VariantID uid(528091, 415036, 0);
+		static REL::RelocationID uid(528091, 415036);
 		return (uint32_t*)uid.address();
 	}
 
 	static uint32_t* GetLastFrameActiveShadowCasterLightCount3()
 	{
 		// 143258B68
-		static REL::VariantID uid(528091, 415036, 0);
+		static REL::RelocationID uid(528091, 415036);
 		return (uint32_t*)(uid.address() + 4);
 	}
 
@@ -323,7 +345,7 @@ private:
 	{
 		// 1412FC470
 		using func_t = decltype(&ApplyLensFlare);
-		static REL::Relocation<func_t> func{ REL::VariantID(100440, 107157, 0) };
+		static REL::Relocation<func_t> func{ REL::RelocationID(100440, 107157) };  // No VR equivalent
 		func(light);
 	}
 
@@ -331,14 +353,14 @@ private:
 	{
 		// 14131C890
 		using func_t = decltype(&unk_Accumulate);
-		static REL::Relocation<func_t> func{ REL::VariantID(100819, 107603, 0) };
+		static REL::Relocation<func_t> func{ REL::RelocationID(100819, 107603) };
 		func(light);
 	}
 
 	static uint32_t* GetActiveShadowCasterLightMask()
 	{
 		// 143258B6C
-		static REL::VariantID uid(528093, 415038, 0);
+		static REL::RelocationID uid(528093, 415038);
 		return (uint32_t*)uid.address();
 	}
 
@@ -346,7 +368,7 @@ private:
 	{
 		// 140D3D920
 		using func_t = decltype(&unk_BSPortalGraphEntry_func);
-		static REL::Relocation<func_t> func{ REL::VariantID(74395, 76119, 0) };
+		static REL::Relocation<func_t> func{ REL::RelocationID(74395, 76119) };
 		func(entry);
 	}
 
@@ -354,14 +376,14 @@ private:
 	{
 		// 140D3DA20
 		using func_t = decltype(&unk_BSPortalGraphEntry_func2);
-		static REL::Relocation<func_t> func{ REL::VariantID(74397, 76121, 0) };
+		static REL::Relocation<func_t> func{ REL::RelocationID(74397, 76121) };
 		return func(first, second);
 	}
 
 	static RE::BSCullingProcess* GetUnknownGlobalCullingProcess()
 	{
 		// 143258B00
-		static REL::VariantID uid(528077, 415022, 0);
+		static REL::RelocationID uid(528077, 415022);
 		return **((RE::BSCullingProcess***)uid.address());
 	}
 
@@ -369,7 +391,7 @@ private:
 	{
 		// 14131C170
 		using func_t = decltype(&unk_BSShadowDirectionalLight_set);
-		static REL::Relocation<func_t> func{ REL::VariantID(100817, 107601, 0) };
+		static REL::Relocation<func_t> func{ REL::RelocationID(100817, 107601) };
 		func(light, camera);
 	}
 
@@ -377,7 +399,7 @@ private:
 	{
 		// 1412D2070
 		using func_t = decltype(&ShadowSceneNode_unk_EnableLight);
-		static REL::Relocation<func_t> func{ REL::VariantID(99708, 106342, 0) };
+		static REL::Relocation<func_t> func{ REL::RelocationID(99708, 106342) };
 		func(shadowSceneNode, light);
 	}
 
@@ -385,7 +407,7 @@ private:
 	{
 		// 141334360
 		using func_t = decltype(&BSLight_ClearGeometryList);
-		static REL::Relocation<func_t> func{ REL::VariantID(101298, 108285, 0) };
+		static REL::Relocation<func_t> func{ REL::RelocationID(101298, 108285) };
 		func(light);
 	}
 
@@ -393,7 +415,7 @@ private:
 	{
 		// 1412D3B40
 		using func_t = decltype(&ShadowSceneNode_SetShadowCasterLightArrayEntry);
-		static REL::Relocation<func_t> func{ REL::VariantID(99728, 106365, 0) };
+		static REL::Relocation<func_t> func{ REL::RelocationID(99728, 106365) };
 		func(shadowSceneNode, light, index, unk4);
 	}
 
@@ -402,19 +424,37 @@ private:
 		// 143052D18
 		// 143052D1C
 
-		static REL::VariantID uid1(524978, 411459, 0);
-		static REL::VariantID uid2(524979, 411460, 0);
+		static REL::RelocationID uid1(524978, 411459);
+		static REL::RelocationID uid2(524979, 411460);
 
 		if (index == 0)
 			return *((int*)uid1.address());
 		return *((int*)uid2.address());
 	}
 
+	static float GetVRDRSWidthRatio()
+	{
+		static REL::Offset bDisableDRS{ 0x3186d28 };
+		if (*((int*)bDisableDRS.address()) != 0)
+			return 1.0f;
+		static REL::Offset ratioUid{ 0x3186d14 };
+		return *((float*)ratioUid.address());
+	}
+
+	static float GetVRDRSHeightRatio()
+	{
+		static REL::Offset bDisableDRS{ 0x3186d28 };
+		if (*((int*)bDisableDRS.address()) != 0)
+			return 1.0f;
+		static REL::Offset ratioUid{ 0x3186d18 };
+		return *((float*)ratioUid.address());
+	}
+
 	static void NiCamera_unk_CalculateFrustumOverlap(RE::NiCamera* camera, float* coord, float* result1, float* result2, float epsilon)
 	{
 		// 140C65760
 		using func_t = decltype(&NiCamera_unk_CalculateFrustumOverlap);
-		static REL::Relocation<func_t> func{ REL::VariantID(69265, 70632, 0) };
+		static REL::Relocation<func_t> func{ REL::RelocationID(69265, 70632) };
 		func(camera, coord, result1, result2, epsilon);
 	}
 
@@ -422,7 +462,7 @@ private:
 	{
 		// 1412A9410
 		using func_t = decltype(&BSLightingShaderProperty_IsLightAffectingSurface);
-		static REL::Relocation<func_t> func{ REL::VariantID(98902, 105550, 0) };
+		static REL::Relocation<func_t> func{ REL::RelocationID(98902, 105550) };
 		return func(p, light);
 	}
 
@@ -517,10 +557,10 @@ private:
 				SKSE::stl::report_and_fail("OnDecidedToEnable(...) UpdateCamera call failed on light in " PLUGIN_NAME "!");
 		}
 
-		if (light->GetRuntimeData().drawFocusShadows || (!*GetSelectedFocusShadows() && light->GetIsFrustumOrDirectionalLight())) {
+		if (GetShadowLightDrawFocusShadows(light) || (!*GetSelectedFocusShadows() && light->GetIsFrustumOrDirectionalLight())) {
 			unk_BSShadowDirectionalLight_set(light, camera);
 			unk_Accumulate(light);
-			light->GetRuntimeData().drawFocusShadows = true;
+			SetShadowLightDrawFocusShadows(light, true);
 			*GetSelectedFocusShadows() = true;
 			*GetUnknownSunPointer1() = (uint64_t)light;
 		}
@@ -529,7 +569,8 @@ private:
 		ShadowSceneNode_SetShadowCasterLightArrayEntry(shadowSceneNode, light, *GetLastFrameActiveShadowCasterLightCount2(), 1);
 		{
 			uint32_t tmp = *GetLastFrameActiveShadowCasterLightCount3();
-			light->GetRuntimeData().maskIndex = tmp++;
+			SetShadowLightMaskIndex(light, tmp);
+			tmp++;
 			*GetLastFrameActiveShadowCasterLightCount3() = tmp;
 		}
 
@@ -563,17 +604,60 @@ private:
 			v25 = 1.0f;
 			v26 = 1.0f;
 		}
-		v27 = (float)GetUnkView(0);
-		v28 = (float)GetUnkView(1);
+		float v27_base = (float)GetUnkView(0);
+		float v28_base = (float)GetUnkView(1);
+		if (REL::Module::IsVR()) {
+			v27_base *= GetVRDRSWidthRatio();
+			v28_base *= GetVRDRSHeightRatio();
+		}
+		v27 = v27_base;
+		v28 = v28_base;
 		float left = (v24 + 1.0f) * 0.5f * v27;
 		float right = (v26 + 1.0f) * 0.5f * v27;
 		float top = (1.0f - ((v23 + 1.0f) * 0.5f)) * v28;
 		float bottom = (1.0f - ((v25 + 1.0f) * 0.5f)) * v28;
-		light->GetRuntimeData().projectedBoundingBox = RE::NiRect<std::uint32_t>((uint32_t)left, (uint32_t)right, (uint32_t)top, (uint32_t)bottom);
+		SetShadowLightProjectedBoundingBox(light, RE::NiRect<std::uint32_t>((uint32_t)left, (uint32_t)right, (uint32_t)top, (uint32_t)bottom));
 		uint32_t maskChannel = static_cast<uint32_t>(doneLightCount);
 		light->Accumulate(*GetLastFrameActiveShadowCasterLightCount2(), maskChannel, nullptr);
-		if (light->lensFlareData)
+		if (light->lensFlareData && !REL::Module::IsVR())
 			ApplyLensFlare(light);
+	}
+
+	// helper macro for VR/SE runtime data access (only use when the field
+	// type is identical in both runtime-data structs; shadowmapDescriptors
+	// has a different element type in VR vs. non‑VR and cannot be used here)
+	#define SHADOW_FIELD(light, member) \
+		(REL::Module::IsVR() \
+		    ? (light)->GetVRRuntimeData().member \
+		    : (light)->GetRuntimeData().member)
+
+	static RE::BSCullingProcess* GetShadowLightCullingProcess(RE::BSShadowLight* light)
+	{
+		// shadowmapDescriptors has different element types, so avoid the macro
+		if (REL::Module::IsVR())
+			return light->GetVRRuntimeData().shadowmapDescriptors.front().cullingProcess;
+		else
+			return light->GetRuntimeData().shadowmapDescriptors.front().cullingProcess;
+	}
+
+	static bool GetShadowLightDrawFocusShadows(RE::BSShadowLight* light)
+	{
+		return SHADOW_FIELD(light, drawFocusShadows);
+	}
+
+	static void SetShadowLightDrawFocusShadows(RE::BSShadowLight* light, bool value)
+	{
+		SHADOW_FIELD(light, drawFocusShadows) = value;
+	}
+
+	static void SetShadowLightMaskIndex(RE::BSShadowLight* light, uint32_t value)
+	{
+		SHADOW_FIELD(light, maskIndex) = value;
+	}
+
+	static void SetShadowLightProjectedBoundingBox(RE::BSShadowLight* light, RE::NiRect<std::uint32_t> rect)
+	{
+		SHADOW_FIELD(light, projectedBoundingBox) = rect;
 	}
 
 	struct _tmp_l
@@ -593,110 +677,115 @@ private:
 		int      doneLightCount = 0;
 		uint64_t isSelectedSun = 0;
 
-		if (!GetUnknownSunBool2()) {
-			auto sun = shadowSceneNode->GetRuntimeData().sunShadowDirLight;
-			if (sun) {
-				uint32_t zero = 0;
-				sun->Accumulate(*GetLastFrameActiveShadowCasterLightCount2(), zero, nullptr);
+		if (!REL::Module::IsVR() || GetVRDrawShadowsDisplay()) {  // VR only check
+			if (!GetUnknownSunBool2()) {
+				auto sun = shadowSceneNode->GetRuntimeData().sunShadowDirLight;
+				if (sun) {
+					uint32_t zero = 0;
+					sun->Accumulate(*GetLastFrameActiveShadowCasterLightCount2(), zero, nullptr);
 
-				if (sunBool1) {
-					unk_Accumulate(sun);
-					sun->GetRuntimeData().drawFocusShadows = true;
-					*GetSelectedFocusShadows() = true;
-					*GetUnknownSunPointer1() = 0;
+					if (sunBool1) {
+						unk_Accumulate(sun);
+						SetShadowLightDrawFocusShadows(sun, true);
+						*GetSelectedFocusShadows() = true;
+						*GetUnknownSunPointer1() = 0;
+					}
+
+					if (sun->lensFlareData && !REL::Module::IsVR())
+						ApplyLensFlare(sun);
+					else if (REL::Module::IsVR() && !GetVRbAccumulateShadowMapsFirst()) {
+						ApplyLensFlare(sun);
+						ApplyAccmulateShadowMaps2(sun);
+					}
+					doneLightCount = 1;
+					isSelectedSun = (uint64_t)sun;
 				}
-
-				if (sun->lensFlareData)
-					ApplyLensFlare(sun);
-
-				doneLightCount = 1;
-				isSelectedSun = (uint64_t)sun;
 			}
-		}
 
-		if (sunBool1 && !*GetSelectedFocusShadows()) {
-			for (auto itr = shadowSceneNode->GetRuntimeData().activeShadowLights.begin(); itr != shadowSceneNode->GetRuntimeData().activeShadowLights.end(); itr++) {
-				auto l = itr->get();
-				if (!l)
-					continue;
+			if (sunBool1 && !*GetSelectedFocusShadows()) {
+				for (auto itr = shadowSceneNode->GetRuntimeData().activeShadowLights.begin(); itr != shadowSceneNode->GetRuntimeData().activeShadowLights.end(); itr++) {
+					auto l = itr->get();
+					if (!l)
+						continue;
 
-				if ((uint64_t)l == *GetUnknownSunPointer1() && !*GetSelectedFocusShadows()) {
-					l->GetRuntimeData().drawFocusShadows = true;
-					*GetSelectedFocusShadows() = true;
-				} else
-					l->GetRuntimeData().drawFocusShadows = false;
-			}
-		}
-
-		*GetUnknownSunPointer1() = 0;
-
-		auto* data = &get()->_gamedata;
-
-		//clearFrameConvert();
-
-		int32_t thisFrameIndex = 0;
-
-		if (shadowSceneNode->GetRuntimeData().activeShadowLights.size() > 0) {
-			std::vector<_tmp_l> vec;
-
-			SetupSceneFormula(worldCamera, shadowSceneNode);
-
-			int32_t tmpIndex = 0;
-			for (auto itr = shadowSceneNode->GetRuntimeData().activeShadowLights.begin(); itr != shadowSceneNode->GetRuntimeData().activeShadowLights.end(); itr++) {
-				auto l = itr->get();
-				if (!l)
-					continue;
-
-				auto& e = vec.emplace_back();
-				e.bslight = l;
-				e.score = CalculateLightScore(l, worldCamera, tmpIndex++, shadowSceneNode);
-				e.allowConvert = 1.0;
-				if (g_formulaAllowConvert)
-					e.allowConvert = g_formulaAllowConvert->Calculate();
-			}
-			std::sort(vec.begin(), vec.end(), _SortFunc);
-
-			for (int i = 0; i < 4; i++)
-				g_lastFrameChosen[i] = 0;
-
-			if (data && data->DebugCurrentSCLight)
-				data->DebugCurrentSCLight->value = (float)(doneLightCount + (int32_t)vec.size());
-
-			int debugConvert = 0;
-			if (data && data->DebugForceConvert)
-				debugConvert = (int)data->DebugForceConvert->value;
-
-			for (auto itr = vec.begin(); itr != vec.end(); itr++) {
-				auto                    l = itr->bslight;
-				RE::BSCullingProcess*   cull;
-				RE::BSPortalGraphEntry* portal;
-				if (doneLightCount < settings::iLightCount && debugConvert <= 0 && l->UpdateCamera(worldCamera) && (cull = l->GetRuntimeData().shadowmapDescriptors.front().cullingProcess) != nullptr && (portal = cull->portalGraphEntry) != nullptr && unk_BSPortalGraphEntry_func2(GetUnknownGlobalCullingProcess()->portalGraphEntry, portal)) {
-					OnDecidedToEnable(l, worldCamera, shadowSceneNode, doneLightCount);
-					doneLightCount++;
-
-					if (thisFrameIndex < 4)
-						g_lastFrameChosen[thisFrameIndex++] = (uint64_t)l;
-				} else if (settings::bTryNormalLight && debugConvert >= 0 && doneLightCount >= settings::iLightCount && itr->allowConvert >= 0.5 && l->UpdateCamera(worldCamera) && (cull = l->GetRuntimeData().shadowmapDescriptors.front().cullingProcess) != nullptr && (portal = cull->portalGraphEntry) != nullptr && unk_BSPortalGraphEntry_func2(GetUnknownGlobalCullingProcess()->portalGraphEntry, portal)) {
-					int converted = addFrameConvert(l, worldCamera, shadowSceneNode);
-					if (converted >= 0) {
-						// this is now done in addFrameConvert
-						//OnDecidedToConvert(l, worldCamera, shadowSceneNode);
+					if ((uint64_t)l == *GetUnknownSunPointer1() && !*GetSelectedFocusShadows()) {
+						SetShadowLightDrawFocusShadows(l, true);
+						*GetSelectedFocusShadows() = true;
 					} else
-						OnDecidedToDisable(l);
-				} else {
-					OnDecidedToDisable(l);
+						SetShadowLightDrawFocusShadows(l, false);
 				}
 			}
 
-			if (data && data->DebugActiveSCLight)
-				data->DebugActiveSCLight->value = (float)(doneLightCount);
+			*GetUnknownSunPointer1() = 0;
+
+			auto* data = &get()->_gamedata;
+
+			//clearFrameConvert();
+
+			int32_t thisFrameIndex = 0;
+
+			if (shadowSceneNode->GetRuntimeData().activeShadowLights.size() > 0) {
+				std::vector<_tmp_l> vec;
+
+				SetupSceneFormula(worldCamera, shadowSceneNode);
+
+				int32_t tmpIndex = 0;
+				for (auto itr = shadowSceneNode->GetRuntimeData().activeShadowLights.begin(); itr != shadowSceneNode->GetRuntimeData().activeShadowLights.end(); itr++) {
+					auto l = itr->get();
+					if (!l)
+						continue;
+
+					auto& e = vec.emplace_back();
+					e.bslight = l;
+					e.score = CalculateLightScore(l, worldCamera, tmpIndex++, shadowSceneNode);
+					e.allowConvert = 1.0;
+					if (g_formulaAllowConvert)
+						e.allowConvert = g_formulaAllowConvert->Calculate();
+				}
+				std::sort(vec.begin(), vec.end(), _SortFunc);
+
+				for (int i = 0; i < 4; i++)
+					g_lastFrameChosen[i] = 0;
+
+				if (data && data->DebugCurrentSCLight)
+					data->DebugCurrentSCLight->value = (float)(doneLightCount + (int32_t)vec.size());
+
+				int debugConvert = 0;
+				if (data && data->DebugForceConvert)
+					debugConvert = (int)data->DebugForceConvert->value;
+
+				for (auto itr = vec.begin(); itr != vec.end(); itr++) {
+					auto                    l = itr->bslight;
+					RE::BSCullingProcess*   cull;
+					RE::BSPortalGraphEntry* portal;
+					if (doneLightCount < settings::iLightCount && debugConvert <= 0 && l->UpdateCamera(worldCamera) && (cull = GetShadowLightCullingProcess(l)) != nullptr && (portal = cull->portalGraphEntry) != nullptr && unk_BSPortalGraphEntry_func2(GetUnknownGlobalCullingProcess()->portalGraphEntry, portal)) {
+						OnDecidedToEnable(l, worldCamera, shadowSceneNode, doneLightCount);
+						doneLightCount++;
+
+						if (thisFrameIndex < 4)
+							g_lastFrameChosen[thisFrameIndex++] = (uint64_t)l;
+					} else if (settings::bTryNormalLight && debugConvert >= 0 && doneLightCount >= settings::iLightCount && itr->allowConvert >= 0.5 && l->UpdateCamera(worldCamera) && (cull = GetShadowLightCullingProcess(l)) != nullptr && (portal = cull->portalGraphEntry) != nullptr && unk_BSPortalGraphEntry_func2(GetUnknownGlobalCullingProcess()->portalGraphEntry, portal)) {
+						int converted = addFrameConvert(l, worldCamera, shadowSceneNode);
+						if (converted >= 0) {
+							// this is now done in addFrameConvert
+							//OnDecidedToConvert(l, worldCamera, shadowSceneNode);
+						} else
+							OnDecidedToDisable(l);
+					} else {
+						OnDecidedToDisable(l);
+					}
+				}
+
+				if (data && data->DebugActiveSCLight)
+					data->DebugActiveSCLight->value = (float)(doneLightCount);
+			}
+
+			if (data && data->DebugData)
+				data->DebugData->value = (float)g_frameConvert.size();
+
+			shadowSceneNode->GetRuntimeData().firstPersonShadowMask = *GetActiveShadowCasterLightMask();
+			*GetLastFrameActiveShadowCasterLightCount1() = (uint32_t)doneLightCount;
 		}
-
-		if (data && data->DebugData)
-			data->DebugData->value = (float)g_frameConvert.size();
-
-		shadowSceneNode->GetRuntimeData().firstPersonShadowMask = *GetActiveShadowCasterLightMask();
-		*GetLastFrameActiveShadowCasterLightCount1() = (uint32_t)doneLightCount;
 	}
 
 	static bool _SortFunc(const _tmp_l& first, const _tmp_l& second)
@@ -836,7 +925,7 @@ private:
 	static bool Hook_Calculate()
 	{
 		static _addr addr[] = {
-			_addr(100419, 0, "48 89 6C 24 18"),
+			_addr(100419, 0, !REL::Module::IsVR() ? "48 89 6C 24 18" : "48 89 6C 24 10"),
 			_addr(107137, 0, "48 89 6C 24 18"),
 		};
 
