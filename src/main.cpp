@@ -473,7 +473,7 @@ private:
 		}
 
 		unk_BSPortalGraphEntry_func(portal);
-		light->Reset();
+		light->ClearShadowMapData();
 	}
 
 	static void OnDecidedToConvert(RE::BSShadowLight* light, RE::NiCamera* camera, RE::ShadowSceneNode* shadowSceneNode, bool prepass)
@@ -491,7 +491,7 @@ private:
 				SKSE::stl::report_and_fail("OnDecidedToConvert(...) had null portal graph entry on a light in " PLUGIN_NAME "!");
 
 			unk_BSPortalGraphEntry_func(portal);
-			light->Reset();
+			light->ClearShadowMapData();
 		} else {
 			ShadowSceneNode_unk_EnableLight(shadowSceneNode, light);
 		}
@@ -513,11 +513,11 @@ private:
 		}
 
 		if (isDelayed) {
-			if (!light->SetFrameCamera(*camera))
-				SKSE::stl::report_and_fail("OnDecidedToEnable(...) SetFrameCamera call failed on light in " PLUGIN_NAME "!");
+			if (!light->UpdateCamera(camera))
+				SKSE::stl::report_and_fail("OnDecidedToEnable(...) UpdateCamera call failed on light in " PLUGIN_NAME "!");
 		}
 
-		if (light->GetRuntimeData().drawFocusShadows || (!*GetSelectedFocusShadows() && light->AreFocusShadowsSupported())) {
+		if (light->GetRuntimeData().drawFocusShadows || (!*GetSelectedFocusShadows() && light->GetIsFrustumOrDirectionalLight())) {
 			unk_BSShadowDirectionalLight_set(light, camera);
 			unk_Accumulate(light);
 			light->GetRuntimeData().drawFocusShadows = true;
@@ -529,7 +529,7 @@ private:
 		ShadowSceneNode_SetShadowCasterLightArrayEntry(shadowSceneNode, light, *GetLastFrameActiveShadowCasterLightCount2(), 1);
 		{
 			uint32_t tmp = *GetLastFrameActiveShadowCasterLightCount3();
-			light->GetRuntimeData().shadowLightIndex = tmp++;
+			light->GetRuntimeData().maskIndex = tmp++;
 			*GetLastFrameActiveShadowCasterLightCount3() = tmp;
 		}
 
@@ -569,8 +569,9 @@ private:
 		float right = (v26 + 1.0f) * 0.5f * v27;
 		float top = (1.0f - ((v23 + 1.0f) * 0.5f)) * v28;
 		float bottom = (1.0f - ((v25 + 1.0f) * 0.5f)) * v28;
-		light->GetRuntimeData().port = RE::NiRect<int32_t>((int)left, (int)right, (int)top, (int)bottom);
-		light->Cull(*GetLastFrameActiveShadowCasterLightCount2(), (uint32_t)doneLightCount, nullptr);
+		light->GetRuntimeData().projectedBoundingBox = RE::NiRect<std::uint32_t>((uint32_t)left, (uint32_t)right, (uint32_t)top, (uint32_t)bottom);
+		uint32_t maskChannel = static_cast<uint32_t>(doneLightCount);
+		light->Accumulate(*GetLastFrameActiveShadowCasterLightCount2(), maskChannel, nullptr);
 		if (light->lensFlareData)
 			ApplyLensFlare(light);
 	}
@@ -593,9 +594,10 @@ private:
 		uint64_t isSelectedSun = 0;
 
 		if (!GetUnknownSunBool2()) {
-			auto sun = shadowSceneNode->GetRuntimeData().shadowDirLight;
+			auto sun = shadowSceneNode->GetRuntimeData().sunShadowDirLight;
 			if (sun) {
-				sun->Cull(*GetLastFrameActiveShadowCasterLightCount2(), 0, 0);
+				uint32_t zero = 0;
+				sun->Accumulate(*GetLastFrameActiveShadowCasterLightCount2(), zero, nullptr);
 
 				if (sunBool1) {
 					unk_Accumulate(sun);
@@ -668,13 +670,13 @@ private:
 				auto                    l = itr->bslight;
 				RE::BSCullingProcess*   cull;
 				RE::BSPortalGraphEntry* portal;
-				if (doneLightCount < settings::iLightCount && debugConvert <= 0 && l->SetFrameCamera(*worldCamera) && (cull = l->GetRuntimeData().shadowmapDescriptors.front().cullingProcess) != nullptr && (portal = cull->portalGraphEntry) != nullptr && unk_BSPortalGraphEntry_func2(GetUnknownGlobalCullingProcess()->portalGraphEntry, portal)) {
+				if (doneLightCount < settings::iLightCount && debugConvert <= 0 && l->UpdateCamera(worldCamera) && (cull = l->GetRuntimeData().shadowmapDescriptors.front().cullingProcess) != nullptr && (portal = cull->portalGraphEntry) != nullptr && unk_BSPortalGraphEntry_func2(GetUnknownGlobalCullingProcess()->portalGraphEntry, portal)) {
 					OnDecidedToEnable(l, worldCamera, shadowSceneNode, doneLightCount);
 					doneLightCount++;
 
 					if (thisFrameIndex < 4)
 						g_lastFrameChosen[thisFrameIndex++] = (uint64_t)l;
-				} else if (settings::bTryNormalLight && debugConvert >= 0 && doneLightCount >= settings::iLightCount && itr->allowConvert >= 0.5 && l->SetFrameCamera(*worldCamera) && (cull = l->GetRuntimeData().shadowmapDescriptors.front().cullingProcess) != nullptr && (portal = cull->portalGraphEntry) != nullptr && unk_BSPortalGraphEntry_func2(GetUnknownGlobalCullingProcess()->portalGraphEntry, portal)) {
+				} else if (settings::bTryNormalLight && debugConvert >= 0 && doneLightCount >= settings::iLightCount && itr->allowConvert >= 0.5 && l->UpdateCamera(worldCamera) && (cull = l->GetRuntimeData().shadowmapDescriptors.front().cullingProcess) != nullptr && (portal = cull->portalGraphEntry) != nullptr && unk_BSPortalGraphEntry_func2(GetUnknownGlobalCullingProcess()->portalGraphEntry, portal)) {
 					int converted = addFrameConvert(l, worldCamera, shadowSceneNode);
 					if (converted >= 0) {
 						// this is now done in addFrameConvert
@@ -737,7 +739,7 @@ private:
 		}
 		FormulaHelper::SetParam(FormulaParams::kFormulaParam_LightChosenLastFrame, chosenLastFrame);
 
-		FormulaHelper::SetParam(FormulaParams::kFormulaParam_LightNeverFades, light->neverFades ? 0.0 : 1.0);  // this declaration is backwards in commonlib, neverFades false means actually never fades
+		FormulaHelper::SetParam(FormulaParams::kFormulaParam_LightNeverFades, light->lodFade ? 0.0 : 1.0);  // lodFade false means the light never fades (never fades = 1.0)
 		FormulaHelper::SetParam(FormulaParams::kFormulaParam_LightPortalStrict, light->portalStrict ? 1.0 : 0.0);
 
 		float x, y, z;

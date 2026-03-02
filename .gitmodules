@@ -1,4 +1,4 @@
 [submodule "lib/commonlibsse-ng"]
 	path = lib/commonlibsse-ng
 	url = https://github.com/alandtse/CommonLibVR.git
-	branch = fix-shadow-lights-test
+	branch = ng
