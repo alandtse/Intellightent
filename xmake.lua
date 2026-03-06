@@ -40,7 +40,7 @@ add_packages("exprtk")
 set_basename("intellightent-ng")
 
 -- generate PDB (releasedbg handles /Zi; /DEBUG tells linker to emit PDB for the DLL)
-add_shflags("/DEBUG", {force = true})
+add_shflags("/DEBUG", { force = true })
 
 -- version config vars
 set_configvar("VERSION_MAJOR", tonumber(ver[1]))
