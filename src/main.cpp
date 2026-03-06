@@ -285,6 +285,14 @@ private:
 		func(light);
 	}
 
+	static void VRPrepareShadowMaps(RE::BSLight* light)
+	{
+		// VR only 141356e50 - manages shadow map resources (ref counting per descriptor)
+		using func_t = decltype(&VRPrepareShadowMaps);
+		static REL::Relocation<func_t> func{ REL::Offset(0x1356e50) };
+		func(light);
+	}
+
 	static bool GetUnknownSunBool1()
 	{
 		// 141E33EB3
@@ -364,18 +372,18 @@ private:
 		return (uint32_t*)uid.address();
 	}
 
-	static void unk_BSPortalGraphEntry_func(RE::BSPortalGraphEntry* entry)
+	static void BSPortalGraphEntry_ClearVisibility(RE::BSPortalGraphEntry* entry)
 	{
-		// 140D3D920
-		using func_t = decltype(&unk_BSPortalGraphEntry_func);
+		// SE 140D3D920 / VR 140d86b70 - clears visibilityMap and releases multiBoundRoomRoot
+		using func_t = decltype(&BSPortalGraphEntry_ClearVisibility);
 		static REL::Relocation<func_t> func{ REL::RelocationID(74395, 76119) };
 		func(entry);
 	}
 
-	static bool unk_BSPortalGraphEntry_func2(RE::BSPortalGraphEntry* first, RE::BSPortalGraphEntry* second)
+	static bool BSPortalGraphEntry_HasSharedVisibility(RE::BSPortalGraphEntry* first, RE::BSPortalGraphEntry* second)
 	{
-		// 140D3DA20
-		using func_t = decltype(&unk_BSPortalGraphEntry_func2);
+		// SE 140D3DA20 / VR 140d86c70 - true if entries share visible rooms or both have visibleUnboundSpace
+		using func_t = decltype(&BSPortalGraphEntry_HasSharedVisibility);
 		static REL::Relocation<func_t> func{ REL::RelocationID(74397, 76121) };
 		return func(first, second);
 	}
@@ -453,9 +461,26 @@ private:
 	static void NiCamera_unk_CalculateFrustumOverlap(RE::NiCamera* camera, float* coord, float* result1, float* result2, float epsilon)
 	{
 		// 140C65760
-		using func_t = decltype(&NiCamera_unk_CalculateFrustumOverlap);
-		static REL::Relocation<func_t> func{ REL::RelocationID(69265, 70632) };
-		func(camera, coord, result1, result2, epsilon);
+		// The binary uses the same address in VR and non‑VR builds, but the
+		// prototype differs.  Non‑VR omits the eye index parameter, whereas VR
+		// adds a uint32_t before the epsilon.  Dispatch at runtime instead of
+		// duplicating the relocation.
+		//
+		// VR eye index: 0xffffffff (-1 as signed) → use combined ViewFrustum (both eyes).
+		// Passing a non-negative index (0=left, 1=right) selects one per-eye frustum,
+		// which causes lights near the boundary to flicker with small HMD movements.
+
+		static REL::Relocation<std::uintptr_t> addr{ REL::RelocationID(69265, 70632) };
+		auto                                   ptr = addr.address();
+		if (REL::Module::IsVR()) {
+			using vr_t = void (*)(RE::NiCamera*, float*, float*, float*, std::uint32_t, float);
+			auto func = reinterpret_cast<vr_t>(ptr);
+			func(camera, coord, result1, result2, 0xffffffff /*combined frustum, both eyes*/, epsilon);
+		} else {
+			using nonvr_t = void (*)(RE::NiCamera*, float*, float*, float*, float);
+			auto func = reinterpret_cast<nonvr_t>(ptr);
+			func(camera, coord, result1, result2, epsilon);
+		}
 	}
 
 	static bool BSLightingShaderProperty_IsLightAffectingSurface(RE::BSLightingShaderProperty* p, RE::BSLight* light)
@@ -512,7 +537,7 @@ private:
 			}
 		}
 
-		unk_BSPortalGraphEntry_func(portal);
+		BSPortalGraphEntry_ClearVisibility(light->cullingProcess->portalGraphEntry);
 		light->ClearShadowMapData();
 	}
 
@@ -530,7 +555,7 @@ private:
 			if (!portal)
 				SKSE::stl::report_and_fail("OnDecidedToConvert(...) had null portal graph entry on a light in " PLUGIN_NAME "!");
 
-			unk_BSPortalGraphEntry_func(portal);
+			BSPortalGraphEntry_ClearVisibility(portal);
 			light->ClearShadowMapData();
 		} else {
 			ShadowSceneNode_unk_EnableLight(shadowSceneNode, light);
@@ -584,7 +609,7 @@ private:
 		float v21 = nilight->world.translate.z - camera->world.translate.z;
 		float v22 = sqrtf(v19 * v19 + v17 * v17 + v21 * v21);
 		float v25, v23, v27, v26, v24, v28;
-		if (v22 >= nilight->GetLightRuntimeData().radius.x + camera->GetRuntimeData2().viewFrustum.fNear) {
+		if (v22 >= nilight->GetLightRuntimeData().radius.x + camera->GetNearPlane()) {
 			float v34[4];
 			v34[3] = nilight->GetLightRuntimeData().radius.x;
 			v34[0] = v15 - ((v17 * v20) * (1.0f / v22));
@@ -617,19 +642,16 @@ private:
 		float top = (1.0f - ((v23 + 1.0f) * 0.5f)) * v28;
 		float bottom = (1.0f - ((v25 + 1.0f) * 0.5f)) * v28;
 		SetShadowLightProjectedBoundingBox(light, RE::NiRect<std::uint32_t>((uint32_t)left, (uint32_t)right, (uint32_t)top, (uint32_t)bottom));
-		uint32_t maskChannel = static_cast<uint32_t>(doneLightCount);
-		light->Accumulate(*GetLastFrameActiveShadowCasterLightCount2(), maskChannel, nullptr);
+		light->Accumulate(*GetLastFrameActiveShadowCasterLightCount2(), static_cast<std::uint32_t>(doneLightCount), nullptr);
 		if (light->lensFlareData && !REL::Module::IsVR())
 			ApplyLensFlare(light);
 	}
 
-	// helper macro for VR/SE runtime data access (only use when the field
-	// type is identical in both runtime-data structs; shadowmapDescriptors
-	// has a different element type in VR vs. non‑VR and cannot be used here)
-	#define SHADOW_FIELD(light, member) \
-		(REL::Module::IsVR() \
-		    ? (light)->GetVRRuntimeData().member \
-		    : (light)->GetRuntimeData().member)
+// helper macro for VR/SE runtime data access (only use when the field
+// type is identical in both runtime-data structs; shadowmapDescriptors
+// has a different element type in VR vs. non‑VR and cannot be used here)
+#define SHADOW_FIELD(light, member) \
+	(REL::Module::IsVR() ? (light)->GetVRRuntimeData().member : (light)->GetRuntimeData().member)
 
 	static RE::BSCullingProcess* GetShadowLightCullingProcess(RE::BSShadowLight* light)
 	{
@@ -681,8 +703,10 @@ private:
 			if (!GetUnknownSunBool2()) {
 				auto sun = shadowSceneNode->GetRuntimeData().sunShadowDirLight;
 				if (sun) {
-					uint32_t zero = 0;
-					sun->Accumulate(*GetLastFrameActiveShadowCasterLightCount2(), zero, nullptr);
+					// VR: a_vrUpdateFlag = 1 + shadowUpdateFlag (set by ResetCalculatedShadowCasterLights); SE/AE: ignores extra param anyway
+					static REL::Relocation<bool*> g_vrShadowUpdateFlag{ REL::Offset(0x1ed62f8) };
+					std::uint8_t                  vrFlag = REL::Module::IsVR() ? static_cast<std::uint8_t>(*g_vrShadowUpdateFlag) + 1 : 0;
+					sun->Accumulate(*GetLastFrameActiveShadowCasterLightCount2(), 0, nullptr, vrFlag);
 
 					if (sunBool1) {
 						unk_Accumulate(sun);
@@ -693,8 +717,8 @@ private:
 
 					if (sun->lensFlareData && !REL::Module::IsVR())
 						ApplyLensFlare(sun);
-					else if (REL::Module::IsVR() && !GetVRbAccumulateShadowMapsFirst()) {
-						ApplyLensFlare(sun);
+					if (REL::Module::IsVR() && !GetVRbAccumulateShadowMapsFirst()) {
+						VRPrepareShadowMaps(sun);
 						ApplyAccmulateShadowMaps2(sun);
 					}
 					doneLightCount = 1;
@@ -758,13 +782,13 @@ private:
 					auto                    l = itr->bslight;
 					RE::BSCullingProcess*   cull;
 					RE::BSPortalGraphEntry* portal;
-					if (doneLightCount < settings::iLightCount && debugConvert <= 0 && l->UpdateCamera(worldCamera) && (cull = GetShadowLightCullingProcess(l)) != nullptr && (portal = cull->portalGraphEntry) != nullptr && unk_BSPortalGraphEntry_func2(GetUnknownGlobalCullingProcess()->portalGraphEntry, portal)) {
+					if (doneLightCount < settings::iLightCount && debugConvert <= 0 && l->UpdateCamera(worldCamera) && (cull = GetShadowLightCullingProcess(l)) != nullptr && (portal = cull->portalGraphEntry) != nullptr && BSPortalGraphEntry_HasSharedVisibility(GetUnknownGlobalCullingProcess()->portalGraphEntry, portal)) {
 						OnDecidedToEnable(l, worldCamera, shadowSceneNode, doneLightCount);
 						doneLightCount++;
 
 						if (thisFrameIndex < 4)
 							g_lastFrameChosen[thisFrameIndex++] = (uint64_t)l;
-					} else if (settings::bTryNormalLight && debugConvert >= 0 && doneLightCount >= settings::iLightCount && itr->allowConvert >= 0.5 && l->UpdateCamera(worldCamera) && (cull = GetShadowLightCullingProcess(l)) != nullptr && (portal = cull->portalGraphEntry) != nullptr && unk_BSPortalGraphEntry_func2(GetUnknownGlobalCullingProcess()->portalGraphEntry, portal)) {
+					} else if (settings::bTryNormalLight && debugConvert >= 0 && doneLightCount >= settings::iLightCount && itr->allowConvert >= 0.5 && l->UpdateCamera(worldCamera) && (cull = GetShadowLightCullingProcess(l)) != nullptr && (portal = cull->portalGraphEntry) != nullptr && BSPortalGraphEntry_HasSharedVisibility(GetUnknownGlobalCullingProcess()->portalGraphEntry, portal)) {
 						int converted = addFrameConvert(l, worldCamera, shadowSceneNode);
 						if (converted >= 0) {
 							// this is now done in addFrameConvert
