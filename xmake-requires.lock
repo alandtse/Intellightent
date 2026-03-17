@@ -11,7 +11,7 @@
             },
             version = "4.0.3"
         },
-        ["directxmath#31fecfc4"] = {
+        ["directxmath 2024.02#31fecfc4"] = {
             repo = {
                 branch = "master",
                 commit = "b0b316eb13e79e5ea7e7a56b80117a3526dedeeb",
@@ -19,7 +19,7 @@
             },
             version = "2024.02"
         },
-        ["directxtk#31fecfc4"] = {
+        ["directxtk 24.2.0#31fecfc4"] = {
             repo = {
                 branch = "master",
                 commit = "b0b316eb13e79e5ea7e7a56b80117a3526dedeeb",
@@ -43,29 +43,32 @@
             },
             version = "1.13.0"
         },
-        ["rapidcsv#31fecfc4"] = {
-            repo = {
-                branch = "master",
-                commit = "c3281e7ae7450a355685a7c91cf455d8fdf9c00c",
-                url = "https://gitlab.com/tboox/xmake-repo.git"
-            },
-            version = "v8.87"
-        },
-        ["simpleini#31fecfc4"] = {
+        ["rapidcsv v8.92#31fecfc4"] = {
+            branch = "v8.92",
             repo = {
                 branch = "master",
                 commit = "b0b316eb13e79e5ea7e7a56b80117a3526dedeeb",
                 url = "https://gitlab.com/tboox/xmake-repo.git"
             },
-            version = "v4.22"
+            version = "v8.92"
         },
-        ["spdlog#9c36f0a9"] = {
+        ["simpleini v4.25#31fecfc4"] = {
+            branch = "v4.25",
             repo = {
                 branch = "master",
-                commit = "e81b38d77a76847788811a838c0e7fbdb199221d",
+                commit = "b0b316eb13e79e5ea7e7a56b80117a3526dedeeb",
                 url = "https://gitlab.com/tboox/xmake-repo.git"
             },
-            version = "v1.15.3"
+            version = "v4.25"
+        },
+        ["spdlog v1.16.0#9c36f0a9"] = {
+            branch = "v1.16.0",
+            repo = {
+                branch = "master",
+                commit = "b0b316eb13e79e5ea7e7a56b80117a3526dedeeb",
+                url = "https://gitlab.com/tboox/xmake-repo.git"
+            },
+            version = "v1.16.0"
         }
     }
 }
