@@ -19,6 +19,7 @@ enum FormulaParams
 	kFormulaParam_LightNeverFades,
 	kFormulaParam_LightPortalStrict,
 	kFormulaParam_LightNS,
+	kFormulaParam_LightConverted,
 
 	kFormulaParam_CameraX,
 	kFormulaParam_CameraY,

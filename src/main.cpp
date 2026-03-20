@@ -3,6 +3,376 @@
 #define PLUGIN_NAME "intellightent-ng"
 #define ESP_NAME "intellightent.esp"
 //#define PLUGIN_DEBUG_FRAME
+//#define L_MEASURE_PERFORMANCE
+//#define USE_ACCUM_SET
+
+int64_t GetPerfCounter()
+{
+	LARGE_INTEGER counter;
+	QueryPerformanceCounter(&counter);
+
+	int64_t t = (int64_t)counter.QuadPart;
+
+	static int64_t freq = 0;
+	if (freq == 0) {
+		LARGE_INTEGER f;
+		QueryPerformanceFrequency(&f);
+
+		freq = f.QuadPart / 1000000;
+	}
+
+	return t / freq;
+}
+
+#ifdef L_MEASURE_PERFORMANCE
+#	define TIMEENTRY_MAX_COUNT 32
+#	define TIMEENTRY_TYPES 2
+
+struct timeentry
+{
+	timeentry()
+	{
+		prog = 0;
+		ptype = -1;
+	}
+
+	std::deque<int64_t> last[TIMEENTRY_TYPES];
+	int64_t             prog;
+	int32_t             ptype;
+
+	int64_t calculateAvgTimeTaken(int32_t type = -1)
+	{
+		if (type < 0) {
+			int64_t sum = 0;
+			for (int i = 0; i < TIMEENTRY_TYPES; i++)
+				sum += calculateAvgTimeTaken(i);
+			return sum;
+		} else {
+			int64_t sum = 0;
+			int32_t count = 0;
+			for (auto x : last[type]) {
+				sum += x;
+				count++;
+			}
+
+			if (count > 1)
+				sum /= count;
+
+			return sum;
+		}
+	}
+
+	int64_t calculateMinTimeTaken(int32_t type = -1)
+	{
+		if (type < 0) {
+			int64_t sum = 0;
+			for (int i = 0; i < TIMEENTRY_TYPES; i++)
+				sum += calculateMinTimeTaken(i);
+			return sum;
+		} else {
+			int64_t low = -1;
+			for (auto x : last[type]) {
+				if (low < 0 || x < low)
+					low = x;
+			}
+
+			if (low >= 0)
+				return low;
+
+			return 0;
+		}
+	}
+
+	int64_t calculateMaxTimeTaken(int32_t type = -1)
+	{
+		if (type < 0) {
+			int64_t sum = 0;
+			for (int i = 0; i < TIMEENTRY_TYPES; i++)
+				sum += calculateMaxTimeTaken(i);
+			return sum;
+		} else {
+			int64_t low = -1;
+			for (auto x : last[type]) {
+				if (low < 0 || x > low)
+					low = x;
+			}
+
+			if (low >= 0)
+				return low;
+
+			return 0;
+		}
+	}
+
+	void begin(int32_t type)
+	{
+		if (ptype >= 0 || type < 0)
+			throw std::exception();
+
+		ptype = type;
+		prog = GetPerfCounter();
+	}
+
+	void end(int32_t type)
+	{
+		if (ptype != type || type < 0)
+			throw std::exception();
+
+		ptype = -1;
+		int64_t now = GetPerfCounter();
+		int64_t diff = now - prog;
+		prog = 0;
+
+		auto& cont = last[type];
+		if ((int32_t)cont.size() >= TIMEENTRY_MAX_COUNT)
+			cont.pop_front();
+
+		cont.push_back(diff);
+	}
+};
+
+struct timemeasure
+{
+	std::mutex                              lock;
+	std::unordered_map<uint64_t, timeentry> lights;
+
+	void beginLight(RE::BSShadowLight* l, int32_t type)
+	{
+		uint64_t key = (uint64_t)l;
+
+		lock.lock();
+		{
+			auto& e = lights[key];
+			e.begin(type);
+		}
+		lock.unlock();
+	}
+
+	void endLight(RE::BSShadowLight* l, int32_t type)
+	{
+		uint64_t key = (uint64_t)l;
+
+		lock.lock();
+		{
+			auto& e = lights[key];
+			e.end(type);
+		}
+		lock.unlock();
+	}
+
+	void printAll()
+	{
+		lock.lock();
+		{
+			for (auto itr = lights.begin(); itr != lights.end(); itr++) {
+#	if TIMEENTRY_TYPES == 2
+				logs::info("Light {:X} Avg: {} + {} = {} / Min: {} + {} = {} / Max: {} + {} = {}", itr->first, itr->second.calculateAvgTimeTaken(0), itr->second.calculateAvgTimeTaken(1), itr->second.calculateAvgTimeTaken(), itr->second.calculateMinTimeTaken(0), itr->second.calculateMinTimeTaken(1), itr->second.calculateMinTimeTaken(), itr->second.calculateMaxTimeTaken(0), itr->second.calculateMaxTimeTaken(1), itr->second.calculateMaxTimeTaken());
+#	else
+				TODO();
+#	endif
+			}
+		}
+		lock.unlock();
+	}
+};
+
+timemeasure g_perf;
+#endif
+
+#define LIGHTBUDGET_MAX_TRACK 8
+
+struct LightBudgetEntry
+{
+	LightBudgetEntry()
+	{
+		memset(Tracked, 0, sizeof(uint16_t) * LIGHTBUDGET_MAX_TRACK);
+	}
+
+	uint64_t Key{ 0 };
+	uint16_t Tracked[LIGHTBUDGET_MAX_TRACK];
+	int32_t  TrackedCount{ 0 };
+	int32_t  LastTrackedHelper{ -1 };
+	uint16_t Progress{ 0 };
+	int32_t  Current{ 0 };
+
+private:
+	int64_t _internalTime{ 0 };
+
+public:
+	void BeginStep(int32_t step)
+	{
+		_internalTime = GetPerfCounter();
+	}
+
+	void EndStep(int32_t step, int32_t helperCounter)
+	{
+		int64_t now = GetPerfCounter();
+		int64_t diff = now - _internalTime;
+
+		if (step == 0)
+			Progress = (uint16_t)(diff > 0xFFFF ? 0xFFFF : diff);
+		else if (step == 1) {
+			diff += Progress;
+
+			int32_t ix = (TrackedCount % LIGHTBUDGET_MAX_TRACK);
+			Current -= Tracked[ix];
+			Tracked[ix] = (uint16_t)(diff > 0xFFFF ? 0xFFFF : diff);
+			Current += Tracked[ix];
+
+			TrackedCount++;
+			LastTrackedHelper = helperCounter;
+		}
+	}
+
+	bool IsExpired(int32_t helperCounter)
+	{
+		if (LastTrackedHelper < 0 || (helperCounter - LastTrackedHelper) >= 600)
+			return true;
+
+		return false;
+	}
+};
+
+struct LightBudgetHelper
+{
+	LightBudgetHelper()
+	{
+		_calcCounter = 0;
+	}
+
+	void Begin(int32_t step)
+	{
+		if (step == 0) {
+			_calcCounter++;
+			if ((_calcCounter % 300) == 0)
+				CleanupExpired();
+		}
+	}
+
+	void End(int32_t step)
+	{
+	}
+
+	void BeginLight(RE::BSShadowLight* l, int32_t step)
+	{
+		uint64_t key = (uint64_t)l;
+
+		LightBudgetEntry* e = nullptr;
+
+		auto itr = _map.find(key);
+		if (itr == _map.end()) {
+			e = new LightBudgetEntry();
+			e->Key = key;
+			_map[key] = e;
+		} else
+			e = itr->second;
+
+		e->BeginStep(step);
+	}
+
+	void EndLight(RE::BSShadowLight* l, int32_t step)
+	{
+		uint64_t key = (uint64_t)l;
+
+		LightBudgetEntry* e = nullptr;
+
+		auto itr = _map.find(key);
+		if (itr == _map.end())  // this should not happen
+			return;
+
+		e = itr->second;
+		e->EndStep(step, _calcCounter);
+	}
+
+	int32_t GetBudget(RE::BSShadowLight* l)
+	{
+		uint64_t key = (uint64_t)l;
+
+		LightBudgetEntry* e = nullptr;
+
+		auto itr2 = _map.find(key);
+		if (itr2 == _map.end() || itr2->second->TrackedCount == 0) {
+			// Light hasn't been measured yet, get average budget cost of all lights
+			int64_t sum = 0;
+			int32_t count = 0;
+
+			for (auto itr = _map.begin(); itr != _map.end(); itr++) {
+				int32_t tmp_sum = itr->second->Current;
+				int32_t tmp_count = std::min(LIGHTBUDGET_MAX_TRACK, itr->second->TrackedCount);
+				if (tmp_count == 0)
+					continue;
+
+				if (tmp_count > 1)
+					tmp_sum /= tmp_count;
+
+				sum += tmp_sum;
+				count++;
+			}
+
+			if (count > 1)
+				sum /= count;
+
+			return (int32_t)sum;
+		} else {
+			int32_t tmp_sum = itr2->second->Current;
+			int32_t tmp_count = std::min(LIGHTBUDGET_MAX_TRACK, itr2->second->TrackedCount);
+
+			if (tmp_count > 1)
+				tmp_sum /= tmp_count;
+
+			return tmp_sum;
+		}
+	}
+
+#ifdef PLUGIN_DEBUG_FRAME
+	void PrintDebug()
+	{
+		for (auto itr = _map.begin(); itr != _map.end(); itr++) {
+			if (itr->second->TrackedCount == 0)
+				continue;
+
+			int32_t              min = -1;
+			int32_t              max = -1;
+			int32_t              avg = GetBudget((RE::BSShadowLight*)itr->first);
+			std::vector<int32_t> tmpvec;
+
+			for (int i = 0; i < LIGHTBUDGET_MAX_TRACK && i < itr->second->TrackedCount; i++) {
+				int32_t v = itr->second->Tracked[i];
+				if (min < 0 || v < min)
+					min = v;
+
+				if (max < 0 || v > max)
+					max = v;
+
+				tmpvec.push_back(v);
+			}
+
+			std::sort(tmpvec.begin(), tmpvec.end());
+			int32_t med = tmpvec[tmpvec.size() / 2];
+
+			logs::info("Light {:X} min: {}; max: {}; avg: {}; med: {}", itr->first, min, max, avg, med);
+		}
+	}
+#endif
+
+private:
+	int32_t                                         _calcCounter;
+	std::unordered_map<uint64_t, LightBudgetEntry*> _map;
+
+	void CleanupExpired()
+	{
+		int32_t c = _calcCounter;
+		for (auto itr = _map.begin(); itr != _map.end();) {
+			if (itr->second->IsExpired(c)) {
+				delete itr->second;
+				itr = _map.erase(itr);
+			} else
+				itr++;
+		}
+	}
+};
+
+LightBudgetHelper g_budget;
 
 struct settings
 {
@@ -18,7 +388,8 @@ struct settings
 		sScoreFormula = "lightradius * lightintensity / (1 + ((1 - lightneverfades) * lightdistance) / 1000) * (1 + lightchosenlastframe * 0.3)";
 		//sAllowConvert = "";
 		//sAllowConvertShadow = "";
-		sRedrawLightInterval = "min(10, (max(0, lightdistance - lightradius * 0.5) / 500) / max(0.5, lightintensity))";
+		sRedrawLightInterval = "min(10, (max(0, lightdistance - lightradius * 0.5) / 500) / max(0.5, lightintensity)) * (lightconverted * 5 + 1)";
+		sRedrawBudget = "1 + isinterior";
 		iCSDebugLightCount = 0;
 		iCSDebugLightConvertCount = 0;
 		bForcePortalStrict = true;
@@ -37,6 +408,7 @@ struct settings
 	static inline std::string sAllowConvert;
 	static inline std::string sAllowConvertShadow;
 	static inline std::string sRedrawLightInterval;
+	static inline std::string sRedrawBudget;
 	static inline int         iCSDebugLightCount;
 	static inline int         iCSDebugLightConvertCount;
 	static inline bool        bForcePortalStrict;
@@ -113,6 +485,7 @@ public:
 		vec.push_back(new map_helper_i{ section, "iMaxRedrawLightPerFrame", &iMaxRedrawLightPerFrame });
 		vec.push_back(new map_helper_b{ section, "bForceAllowDrawNewLight", &bForceAllowDrawNewLight });
 		vec.push_back(new map_helper_b{ section, "bCSDisableUselessPass", &bCSDisableUselessPass });
+		vec.push_back(new map_helper_s{ section, "sRedrawBudget", &sRedrawBudget });
 
 		store->Load();
 
@@ -217,6 +590,7 @@ FormulaHelper* g_formulaLightScore = nullptr;
 FormulaHelper* g_formulaAllowConvert = nullptr;
 FormulaHelper* g_formulaAllowConvertShadow = nullptr;
 FormulaHelper* g_formulaRenderInterval = nullptr;
+FormulaHelper* g_formulaRedrawBudget = nullptr;
 
 struct c_converted
 {
@@ -242,6 +616,20 @@ struct c_light_entry
 	double             RedrawScore{ 0.0 };
 	int32_t            LastDrawnFrame{ -1 };
 	bool               RedrawFrame{ false };
+	int32_t            Index{ -1 };
+	int32_t            DrawIndex{ -1 };
+#ifdef USE_ACCUM_SET
+	std::set<uint64_t>* Accum{ nullptr };
+#endif
+
+	void ClearLight()
+	{
+		Light = nullptr;
+		LastDrawnFrame = -1;
+#ifdef USE_ACCUM_SET
+		Accum->clear();
+#endif
+	}
 };
 
 struct c_light_container
@@ -259,19 +647,28 @@ struct c_light_container
 
 	c_light_entry* Lights;
 	bool           Sun{ false };
+	int            Size{ 0 };
 
-	int32_t FindFreeIndex()
+	int32_t FindFreeIndex(bool shadow)
 	{
-		for (int i = 0; i < settings::iCSDebugLightCount; i++) {
-			if (!Lights[i].Light)
-				return i;
+		if (shadow) {
+			for (int i = 0; i < settings::iCSDebugLightCount; i++) {
+				if (!Lights[i].Light)
+					return i;
+			}
+		} else {
+			int max = settings::iCSDebugLightConvertCount + settings::iCSDebugLightCount;
+			for (int i = settings::iCSDebugLightCount; i < max; i++) {
+				if (!Lights[i].Light)
+					return i;
+			}
 		}
 
 		return -1;
 	}
 };
 
-c_light_container g_lights;
+c_light_container g_lightsAll;
 void**            g_normalDepthBuffer = nullptr;
 void**            g_readOnlyDepthBuffer = nullptr;
 
@@ -317,32 +714,52 @@ struct plugin
 				return "failed to parse redrawLightInterval formula";
 		}
 
-		if (settings::iCSDebugLightCount > 0) {
+		if (!settings::sRedrawBudget.empty()) {
+			g_formulaRedrawBudget = new FormulaHelper();
+			if (!g_formulaRedrawBudget->Parse(settings::sRedrawBudget))
+				return "failed to parse redrawBudget formula";
+		}
+
+		// None of these checks are needed anymore
+		/*if (settings::iCSDebugLightCount > 0)
+		{
+			// This is maybe no longer true and this check can be removed?
 			if ((settings::iCSDebugLightCount % 4) != 0) {
 				settings::iCSDebugLightCount = 0;
 				logs::info("Warning! iCSDebugLightCount must be a multiple of 4. Disabling this option.");
 			}
 
-			if (settings::iCSDebugLightCount > 32) {
-				// In order to lift this limit we must rewrite BSShaderAccumulator writing BSShaderPropertyLightData::activeLightMask, and light list setup in BSRenderPass to support larger than 32 bit mask
-				settings::iCSDebugLightCount = 32;
-				logs::info("Warning! iCSDebugLightCount can't exceed 32. Setting to 32.");
+			if (settings::iCSDebugLightCount > 64)
+			{
+				settings::iCSDebugLightCount = 64;
+				logs::info("Warning! iCSDebugLightCount can't exceed 64. Setting to 64.");
 			}
 
-			if (settings::iCSDebugLightCount + settings::iCSDebugLightConvertCount > 32)
-				logs::info("Warning! iCSDebugLightCount + iCSDebugLightConvertCount exceeds 32. This may cause issues where some lights will not affect surfaces properly if more than 32 shadow lights + shadow lights converted to normal lights are on screen at once.");
+			if (settings::iCSDebugLightCount + settings::iCSDebugLightConvertCount > 64)
+				logs::info("Warning! iCSDebugLightCount + iCSDebugLightConvertCount exceeds 64. This may cause issues where some lights will not affect surfaces properly if more than 64 shadow lights + shadow lights converted to normal lights are on screen at once.");
+
+			if (settings::iMaxRedrawLightPerFrame > 32)
+			{
+				logs::info("Warning! iMaxRedrawLightPerFrame exceeds 32. This is not allowed, setting to 32.");
+				settings::iMaxRedrawLightPerFrame = 32;
+			}
+		}*/
+
+		g_lightsAll.Size = 4;
+		if (settings::iCSDebugLightCount > 0)
+			g_lightsAll.Size = settings::iCSDebugLightCount + std::max(0, settings::iCSDebugLightConvertCount);
+
+		g_lastFrameChosenBuf = (uint64_t*)malloc(sizeof(uint64_t) * g_lightsAll.Size);
+		memset(g_lastFrameChosenBuf, 0, sizeof(uint64_t) * g_lightsAll.Size);
+
+		g_lightsAll.Lights = (c_light_entry*)malloc(sizeof(c_light_entry) * g_lightsAll.Size);
+		for (int i = 0; i < g_lightsAll.Size; i++) {
+			g_lightsAll.Lights[i] = c_light_entry();
+			g_lightsAll.Lights[i].Index = i;
+#ifdef USE_ACCUM_SET
+			g_lightsAll.Lights[i].Accum = new std::set<uint64_t>();
+#endif
 		}
-
-		int lightCount = 4;
-		if (settings::iCSDebugLightCount > 4)
-			lightCount = settings::iCSDebugLightCount;
-
-		g_lastFrameChosenBuf = (uint64_t*)malloc(sizeof(uint64_t) * lightCount);
-		memset(g_lastFrameChosenBuf, 0, sizeof(uint64_t) * lightCount);
-
-		g_lights.Lights = (c_light_entry*)malloc(sizeof(c_light_entry) * lightCount);
-		for (int i = 0; i < lightCount; i++)
-			g_lights.Lights[i] = c_light_entry();
 
 		if (settings::iCSDebugLightCount > 0) {
 			if (!Hook_ExtendLights())
@@ -748,7 +1165,7 @@ private:
 		}
 	}
 
-	static void OnDecidedToEnable(RE::BSShadowLight* light, RE::NiCamera* camera, RE::ShadowSceneNode* shadowSceneNode, int doneLightCount, bool isForCs, bool isSun)
+	static void OnDecidedToEnable(RE::BSShadowLight* light, RE::NiCamera* camera, RE::ShadowSceneNode* shadowSceneNode, int doneLightCount, bool isForCs, bool isSun, bool shadow)
 	{
 		if (!light)
 			SKSE::stl::report_and_fail("Called OnDecidedToEnable(...) on a null light in " PLUGIN_NAME "!");
@@ -790,7 +1207,7 @@ private:
 			}
 		}
 
-		if (!isSun) {
+		if (!isSun && shadow) {
 			ShadowSceneNode_unk_EnableLight(shadowSceneNode, light);
 			ShadowSceneNode_SetShadowCasterLightArrayEntry(shadowSceneNode, light, *GetLastFrameActiveShadowCasterLightCount2(), 1);
 			{
@@ -844,7 +1261,12 @@ private:
 				float top = (1.0f - ((v23 + 1.0f) * 0.5f)) * v28;
 				float bottom = (1.0f - ((v25 + 1.0f) * 0.5f)) * v28;
 				SetShadowLightProjectedBoundingBox(light, RE::NiRect<std::uint32_t>((uint32_t)left, (uint32_t)right, (uint32_t)top, (uint32_t)bottom));
-				light->Accumulate(*GetLastFrameActiveShadowCasterLightCount2(), static_cast<std::uint32_t>(doneLightCount), nullptr);
+				if (isForCs) {
+					uint32_t tmp_i = (uint32_t)doneLightCount;
+					light->Accumulate(tmp_i, (uint32_t)doneLightCount, nullptr);
+					*GetLastFrameActiveShadowCasterLightCount2() += light->shadowMapCount;
+				} else
+					light->Accumulate(*GetLastFrameActiveShadowCasterLightCount2(), static_cast<std::uint32_t>(doneLightCount), nullptr);
 				// Accumulate sets renderTarget=NiLight+0x150 (non-kNONE), causing RenderCascade to
 				// skip the index-selection block and use shadowmapIndex=0 for every light, so all
 				// shadow faces corrupt slot 0. Pre-set renderTarget=kNONE and shadowmapIndex so
@@ -920,7 +1342,7 @@ private:
 		double             allowConvert2{ 0.0 };
 		bool               isNS{ false };
 		bool               sun{ false };
-		bool               chosen{ false };
+		uint8_t            chosen{ 0 };
 		bool               want{ false };
 		bool               redraw{ false };
 	};
@@ -1044,16 +1466,13 @@ private:
 					RE::BSPortalGraphEntry* portal;
 					if (doneLightCount < settings::iLightCount && debugConvert <= 0 && (!itr->isNS || (itr->allowConvert2 >= 0.5 && convertedToShadow < settings::iMaxConvertCountShadow))) {
 						if (l->UpdateCamera(worldCamera) && (cull = GetShadowLightCullingProcess(l)) != nullptr && (portal = cull->portalGraphEntry) != nullptr && BSPortalGraphEntry_HasSharedVisibility(GetUnknownGlobalCullingProcess()->portalGraphEntry, portal)) {
-							OnDecidedToEnable(l, worldCamera, shadowSceneNode, doneLightCount, false, false);
+							OnDecidedToEnable(l, worldCamera, shadowSceneNode, doneLightCount, false, false, true);
 							doneLightCount++;
 
 							if (itr->isNS)
 								convertedToShadow++;
 
-							int mlightCount = 4;
-							if (settings::iCSDebugLightCount > 4)
-								mlightCount = settings::iCSDebugLightCount;
-							if (g_lastFrameChosenCount < mlightCount)
+							if (g_lastFrameChosenCount < 4)
 								g_lastFrameChosenBuf[g_lastFrameChosenCount++] = (uint64_t)l;
 						} else
 							OnDecidedToDisable(l);
@@ -1107,6 +1526,12 @@ private:
 		auto worldSceneGraph = GetWorldSceneGraph();
 		auto worldCamera = ((RE::BSSceneGraph*)worldSceneGraph)->GetRuntimeData().camera.get();
 
+#ifdef L_MEASURE_PERFORMANCE
+		g_perf.beginLight(nullptr, 0);
+#endif
+
+		g_budget.Begin(0);
+
 		std::vector<_tmp_l> all;
 
 		int                doneLightCount = 0;
@@ -1120,7 +1545,7 @@ private:
 				bk.isNS = false;
 				bk.bslight = sun;
 				bk.want = true;
-				bk.chosen = true;
+				bk.chosen = 1;
 
 				isSun = sun;
 
@@ -1190,13 +1615,9 @@ private:
 					if (wantCount >= settings::iCSDebugLightCount) {
 						OnDecidedToDisable(l);
 					} else {
-						itr->chosen = true;
+						itr->chosen = 1;
 
-						int mlightCount = 4;
-						if (settings::iCSDebugLightCount > 4)
-							mlightCount = settings::iCSDebugLightCount;
-
-						if (g_lastFrameChosenCount < mlightCount)
+						if (g_lastFrameChosenCount < 4)
 							g_lastFrameChosenBuf[g_lastFrameChosenCount++] = (uint64_t)l;
 					}
 
@@ -1207,45 +1628,46 @@ private:
 		}
 
 		// Free previous lights that we didn't select anymore
-		for (int i = 0; i < settings::iCSDebugLightCount; i++) {
-			if (g_lights.Lights[i].Light) {
-				bool didChoose = false;
+		for (int i = 0; i < g_lightsAll.Size; i++) {
+			if (g_lightsAll.Lights[i].Light) {
+				uint8_t thisChoose = i < settings::iCSDebugLightCount ? 1 : 2;
+				uint8_t didChoose = 0;
 				for (auto& x : all) {
-					if (x.bslight == g_lights.Lights[i].Light) {
+					if (x.bslight == g_lightsAll.Lights[i].Light) {
 						didChoose = x.chosen;
 						break;
 					}
 				}
 
 				// We can have a OnUnselectLight here if needed or something
-				if (!didChoose) {
-					g_lights.Lights[i].Light = nullptr;
+				if (didChoose != thisChoose) {
+					g_lightsAll.Lights[i].ClearLight();
 					if (i == 0)
-						g_lights.Sun = false;
+						g_lightsAll.Sun = false;
 				}
 			}
 		}
 
 		// Add new lights that we didn't select previously
 		for (auto& x : all) {
-			if (!x.chosen)
+			if (x.chosen == 0)
 				continue;
 
 			if (x.sun) {
-				if (g_lights.Lights[0].Light != x.bslight) {
-					g_lights.Lights[0].Light = x.bslight;
-					g_lights.Lights[0].LastDrawnFrame = -1;
-					g_lights.Sun = true;
+				if (g_lightsAll.Lights[0].Light != x.bslight) {
+					g_lightsAll.Lights[0].ClearLight();
+					g_lightsAll.Lights[0].Light = x.bslight;
+					g_lightsAll.Sun = true;
 				}
 			}
 		}
 		for (auto& x : all) {
-			if (!x.chosen || x.sun)
+			if (x.chosen == 0 || x.sun)
 				continue;
 
 			bool alreadyChosen = false;
-			for (int i = 0; i < settings::iCSDebugLightCount; i++) {
-				if (g_lights.Lights[i].Light == x.bslight) {
+			for (int i = 0; i < g_lightsAll.Size; i++) {
+				if (g_lightsAll.Lights[i].Light == x.bslight) {
 					alreadyChosen = true;
 					break;
 				}
@@ -1254,15 +1676,14 @@ private:
 			if (alreadyChosen)
 				continue;
 
-			int freeIndex = g_lights.FindFreeIndex();
+			int freeIndex = g_lightsAll.FindFreeIndex(x.chosen == 1);
 			if (freeIndex < 0) {
 				// This should never happen!
 				OnDecidedToDisable(x.bslight);
 				continue;
 			}
 
-			g_lights.Lights[freeIndex].Light = x.bslight;
-			g_lights.Lights[freeIndex].LastDrawnFrame = -1;
+			g_lightsAll.Lights[freeIndex].Light = x.bslight;
 			// OnSelectedLight
 		}
 
@@ -1270,62 +1691,121 @@ private:
 		{
 			int maxCan = settings::iMaxRedrawLightPerFrame;
 
-			for (int i = 0; i < settings::iCSDebugLightCount; i++) {
-				auto& l = g_lights.Lights[i];
+			double  budget = 2.0;
+			int32_t budgetRemain = (int32_t)(budget * 1000.0);
+			bool    isFirst = true;
+			int     now = GetCurrentGameFrameCounter();
+
+			for (int i = settings::iCSDebugLightCount; i < g_lightsAll.Size; i++)
+				g_lightsAll.Lights[i].RedrawFrame = false;
+
+			for (int i = 0; i < g_lightsAll.Size; i++) {
+				auto& l = g_lightsAll.Lights[i];
 				if (!l.Light) {
 					l.RedrawFrame = false;
 					continue;
 				}
 
-				l.RedrawFrame = (i == 0 && g_lights.Sun) || (l.LastDrawnFrame < 0 && settings::bForceAllowDrawNewLight);
-				if (l.RedrawFrame)
+				l.RedrawFrame = (i == 0 && g_lightsAll.Sun) || (l.LastDrawnFrame < 0 && settings::bForceAllowDrawNewLight);
+				if (l.RedrawFrame) {
+					l.LastDrawnFrame = now;
+					isFirst = false;
 					maxCan--;
+
+					if (i != 0 || !g_lightsAll.Sun) {
+						int32_t estimatedBudget = g_budget.GetBudget(l.Light);
+						budgetRemain -= estimatedBudget;
+					}
+				}
 			}
 
-			if (maxCan > 0) {
+			if (maxCan > 0 && budgetRemain > 0) {
 				std::vector<c_light_entry*> vec;
-				for (int i = 0; i < settings::iCSDebugLightCount; i++) {
-					auto& l = g_lights.Lights[i];
+				for (int i = 0; i < g_lightsAll.Size; i++) {
+					auto& l = g_lightsAll.Lights[i];
 					if (!l.Light || l.RedrawFrame)
 						continue;
 
 					vec.push_back(&l);
 				}
 
-				int now = GetCurrentGameFrameCounter();
-				if ((int)vec.size() > maxCan) {
-					for (auto e : vec) {
-						double interval = 0.0;
-						if (g_formulaRenderInterval) {
-							SetupLightFormula(e->Light, worldCamera, shadowSceneNode, 0);
-							interval = g_formulaRenderInterval->Calculate();
-						}
-						interval += 1.0;
+				if (g_formulaRedrawBudget)
+					budget = g_formulaRedrawBudget->Calculate();
 
-						e->RedrawScore = e->LastDrawnFrame + interval;
+				for (auto e : vec) {
+					double interval = 0.0;
+					if (g_formulaRenderInterval) {
+						SetupLightFormula(e->Light, worldCamera, shadowSceneNode, 0);
+						if (e->Index >= settings::iCSDebugLightCount)
+							FormulaHelper::SetParam(kFormulaParam_LightConverted, 1.0);
+						interval = g_formulaRenderInterval->Calculate();
+					}
+					interval += 1.0;
+
+					e->RedrawScore = e->LastDrawnFrame + interval;
+				}
+
+				std::sort(vec.begin(), vec.end(), _SortFunc2);
+
+				for (auto e : vec) {
+					if (maxCan <= 0)
+						break;
+
+					if (budgetRemain <= 0)
+						break;
+
+					int32_t budgetEstimate = g_budget.GetBudget(e->Light);
+
+					// First light in the list should always be allowed to draw, because otherwise we can get into a situation where the light exceeds budget and is never going to draw
+					if (isFirst) {
+						if (!g_lightsAll.Sun || e->Index > 0)
+							budgetRemain -= budgetEstimate;
+						maxCan--;
+
+						e->RedrawFrame = true;
+						e->LastDrawnFrame = now;
+						isFirst = false;
+
+						continue;
 					}
 
-					std::sort(vec.begin(), vec.end(), _SortFunc2);
-				} else
-					maxCan = (int)vec.size();
+					// This light fits into the remaining buffer
+					if (budgetEstimate <= budgetRemain) {
+						budgetRemain -= budgetEstimate;
+						maxCan--;
 
-				for (int i = 0; i < maxCan; i++) {
-					auto x = vec[i];
-					x->RedrawFrame = true;
-					x->LastDrawnFrame = now;
+						e->RedrawFrame = true;
+						e->LastDrawnFrame = now;
+
+						continue;
+					}
+
+					// This light does not fit into the budget and will not be redrawn
 				}
 			}
 		}
 
 		// Actually activate the lights now
-		for (int i = 0; i < settings::iCSDebugLightCount; i++) {
-			auto& l = g_lights.Lights[i];
+		for (int i = 0; i < g_lightsAll.Size; i++) {
+			auto& l = g_lightsAll.Lights[i];
 			if (l.Light) {
-				if (l.RedrawFrame) {
-					bool sun = i == 0 && g_lights.Sun;
+				if (l.RedrawFrame && i < settings::iCSDebugLightCount) {
+					bool sun = i == 0 && g_lightsAll.Sun;
 					if (!sun)
 						l.Light->UpdateCamera(worldCamera);
-					OnDecidedToEnable(l.Light, worldCamera, shadowSceneNode, i, true, sun);
+#ifdef L_MEASURE_PERFORMANCE
+					g_perf.beginLight(l.Light, 0);
+#endif
+					g_budget.BeginLight(l.Light, 0);
+#ifdef USE_ACCUM_SET
+					l.Accum->clear();
+#endif
+					OnDecidedToEnable(l.Light, worldCamera, shadowSceneNode, i, true, sun, true);
+					SetShadowLightMaskIndex(l.Light, (uint32_t)i);
+					g_budget.EndLight(l.Light, 0);
+#ifdef L_MEASURE_PERFORMANCE
+					g_perf.endLight(l.Light, 0);
+#endif
 					doneLightCount++;
 				} else {
 					OnDecidedToDisable(l.Light);
@@ -1333,38 +1813,22 @@ private:
 			}
 		}
 
-		int      endIndex = 0;
-		uint32_t maskIndex = 0;
+		int endIndex = 0;
+		//uint32_t maskIndex = 0;
 		while (true) {
 			auto l = shadowSceneNode->GetRuntimeData().shadowCasterLights[endIndex];
 			if (!l)
 				break;
 
 			endIndex += l->shadowMapCount;
-			SetShadowLightMaskIndex(l, maskIndex++);
 		}
 
-		for (int i = 0; i < settings::iCSDebugLightCount; i++) {
-			auto& l = g_lights.Lights[i];
-			if (l.Light && !l.RedrawFrame) {
+		for (int i = 0; i < g_lightsAll.Size; i++) {
+			auto& l = g_lightsAll.Lights[i];
+			if (l.Light && (!l.RedrawFrame || i >= settings::iCSDebugLightCount)) {
 				ShadowSceneNode_SetShadowCasterLightArrayEntry(shadowSceneNode, l.Light, endIndex, 1);
 				endIndex += l.Light->shadowMapCount;
-				SetShadowLightMaskIndex(l.Light, maskIndex++);
-			}
-		}
-
-		// Add extra lights as normal lights
-		if (settings::iCSDebugLightConvertCount > 0) {
-			int can = settings::iCSDebugLightConvertCount;
-			for (auto& l : all) {
-				if (!l.want || l.sun || l.chosen)
-					continue;
-
-				ShadowSceneNode_SetShadowCasterLightArrayEntry(shadowSceneNode, l.bslight, endIndex, 1);
-				endIndex += l.bslight->shadowMapCount;
-
-				if (--can == 0)
-					break;
+				SetShadowLightMaskIndex(l.Light, (uint32_t)i);
 			}
 		}
 
@@ -1385,14 +1849,30 @@ private:
 
 #ifdef PLUGIN_DEBUG_FRAME
 		if (IsDebugFrame()) {
+			static bool print_perf_once = false;
+			if (!print_perf_once) {
+				print_perf_once = true;
+
+#	ifdef L_MEASURE_PERFORMANCE
+				g_perf.printAll();
+#	endif
+				g_budget.PrintDebug();
+			}
+
 			logs::info("Frame == [{}] ==", GetCurrentGameFrameCounter());
-			for (int i = 0; i < settings::iCSDebugLightCount; i++)
-				logs::info("> Light[{}]: {:X}, redrawing: {}", i, (int64_t)g_lights.Lights[i].Light, g_lights.Lights[i].RedrawFrame ? 1 : 0);
+			for (int i = 0; i < g_lightsAll.Size; i++)
+				logs::info("> Light[{}]: {:X}, redrawing: {}", i, (int64_t)g_lightsAll.Lights[i].Light, g_lightsAll.Lights[i].RedrawFrame ? 1 : 0);
 		}
 #endif
 
 		shadowSceneNode->GetRuntimeData().firstPersonShadowMask = *GetActiveShadowCasterLightMask();
 		*GetLastFrameActiveShadowCasterLightCount1() = (uint32_t)doneLightCount;
+
+		g_budget.End(0);
+
+#ifdef L_MEASURE_PERFORMANCE
+		g_perf.endLight(nullptr, 0);
+#endif
 	}
 
 	static bool _SortFunc(const _tmp_l& first, const _tmp_l& second)
@@ -1436,6 +1916,7 @@ private:
 
 	static void SetupLightFormula(RE::BSShadowLight* light, RE::NiCamera* camera, [[maybe_unused]] RE::ShadowSceneNode* shadowSceneNode, int32_t index)
 	{
+		FormulaHelper::SetParam(FormulaParams::kFormulaParam_LightConverted, 0.0);
 		FormulaHelper::SetParam(FormulaParams::kFormulaParam_LightIndex, index);
 
 		double chosenLastFrame = 0.0;
@@ -2003,11 +2484,9 @@ private:
 		if (!HookEx_DisableFocusShadows())
 			return false;
 
-		if (settings::bCSDisableUselessPass) {
+		//if (settings::bCSDisableUselessPass)
+		{
 			if (!HookEx_DisableColorMaskDrawing())
-				return false;
-		} else {
-			if (!HookEx_FixMaskOverflow())
 				return false;
 		}
 
@@ -2029,7 +2508,7 @@ private:
 	static bool HookEx_SetupRenderPass()
 	{
 		// 14132828B - add more shadow lights to render pass lights
-		{
+		/*{
 			static _addr addr[] = {
 				//_addr(100997, 0x286 - 0x1E0, "4C 89 64 24 40 83 C0 08"),
 				//_addr(107784, 0xD018 - 0xCF80, "45 32 E4 83 C0 08"),
@@ -2041,13 +2520,9 @@ private:
 			if (!a)
 				return false;
 
-			if (!MemoryHelper::WriteByte(MemoryHelper::AddPointer(a, 2), (uint8_t)(settings::iCSDebugLightCount * 2)))
+			if (!MemoryHelper::WriteInt32(MemoryHelper::AddPointer(a, 4), settings::iCSDebugLightCount))
 				return false;
-
-			/*int sz = GAME_VER == 0 ? 8 : 6;
-			if (!HookHelper::WriteHook(a, sz, sz, _HookEx_SetupRenderPass))
-				return false;*/
-		}
+		}*/
 
 		// Force consider all lights for surface - temp because i don't know where it calculates active light mask per surface yet
 		/*{
@@ -2068,15 +2543,99 @@ private:
 		return true;
 	}
 
-	/*static void _HookEx_SetupRenderPass(CONTEXT& ctx)
+	/*static void _HookEx_BSLightingShaderProperty_ctor(CONTEXT& ctx)
 	{
-		int have = 8;
-		int want = settings::iCSDebugLightCount * 2;
+		RE::BSShaderPropertyLightData* lightData = (RE::BSShaderPropertyLightData*)ctx.Rdi;
+		uint32_t* tmp = (uint32_t*)&lightData->lightListChanged;
+		tmp++;
+		*tmp = 0;
+	}
 
-		if (want > have)
-			ctx.Rax += (want - have);
+	static void _HookEx_OnAccumulatingLight(CONTEXT& ctx)
+	{
+		RE::BSShaderPropertyLightData* lightData = GAME_VER == 0 ? (RE::BSShaderPropertyLightData*)ctx.Rcx : (RE::BSShaderPropertyLightData*)ctx.Rdx;
+		RE::BSGraphics::BSShaderAccumulator* accumulator = (RE::BSGraphics::BSShaderAccumulator*)ctx.Rsi;
+		int index = (int)(GAME_VER == 0 ? ctx.Rdx : ctx.R8);
+
+		if (index == 0xFFFF)
+		{
+#ifdef PLUGIN_DEBUG_FRAME
+			if (IsDebugFrame())
+				logs::info("OnAccum({}, {:X})", index, (uint64_t)lightData);
+#endif
+
+			lightData->unk1C = 0;
+			uint32_t* tmp = (uint32_t*)&lightData->lightListChanged;
+			tmp++;
+			*tmp = 0;
+		}
+		else if(index >= 1 && index <= g_lightsAll.Size)
+		{
+			index--;
+#ifdef PLUGIN_DEBUG_FRAME
+			if (IsDebugFrame())
+				logs::info("OnAccum({}, {:X})", index, (uint64_t)lightData);
+#endif
+			uint32_t* tmp = (uint32_t*)&lightData->lightListChanged;
+			tmp++;
+			uint32_t now = (uint32_t)GetCurrentGameFrameCounter();
+			if (now != *tmp)
+			{
+				*tmp = now;
+				lightData->unk1C = 0;
+			}
+
+			auto& l = g_lightsAll.Lights[index];
+#ifdef USE_ACCUM_SET
+			l.Accum->insert((uint64_t)lightData);
+#endif
+
+			if(l.DrawIndex >= 0)
+				lightData->unk1C |= (uint32_t)1 << l.DrawIndex;
+		}
 	}*/
 
+	static void _HookEx_CalculateActiveLightsForSurface(CONTEXT& ctx)
+	{
+		// SE: CalculateActiveNonShadowCasterLights @ ID 100997, 10 args
+		// VR: CalculateActiveNonShadowCasterLights @ 0x141354d20, 11 args (extra char a11 @ RSP+0x58, unused)
+		// Verified via Ghidra: VR IsValidLight (ID 98902) @ 0x1412ca950 - same signature as SE
+		[[maybe_unused]] RE::BSShaderPropertyLightData* lightData = (RE::BSShaderPropertyLightData*)ctx.Rcx;                   // a1
+		RE::BSLight**                                   lights = (RE::BSLight**)ctx.Rdx;                                       // a2
+		int                                             maxCount = (int)ctx.R8;                                                // a3
+		int*                                            shadowLightCount = (int*)ctx.R9;                                       // a4
+		RE::ShadowSceneNode*                            shadowSceneNode = *((RE::ShadowSceneNode**)(ctx.Rsp + 0x28));          // a5
+		RE::BSLightingShaderProperty*                   shaderProperty = *((RE::BSLightingShaderProperty**)(ctx.Rsp + 0x30));  // a6
+		bool                                            addShadowLights = *((bool*)(ctx.Rsp + 0x38));                          // a7
+		bool*                                           useShadowSun = *((bool**)(ctx.Rsp + 0x40));                            // a8
+		// a9 (isFirstPersonMesh @ RSP+0x48) and a10 (firstPersonLightMask @ RSP+0x50) unused
+		RE::BSLight* sunLight;
+		if (*useShadowSun)
+			sunLight = shadowSceneNode->GetRuntimeData().sunShadowDirLight;
+		else
+			sunLight = shadowSceneNode->GetRuntimeData().sunLight;
+		if (shaderProperty->flags.any(RE::BSShaderProperty::EShaderPropertyFlag::kCloudLOD))
+			sunLight = shadowSceneNode->GetRuntimeData().cloudLight;
+		lights[0] = sunLight;
+		*shadowLightCount = 0;
+		int addedLightCount = 1;
+		// Add shadow caster lights from our extended pool.
+		// The original uses lightData->unk1C (accumulated-light bitmask) to skip lights that
+		// haven't touched this surface, but we don't populate that mask in CS mode.
+		// Fall back to IsValidLight (the same check the original does after the mask).
+		if (addShadowLights) {
+			for (int i = 0; i < settings::iCSDebugLightCount && addedLightCount < maxCount; i++) {
+				auto& e = g_lightsAll.Lights[i];
+				if (!e.Light || e.Light == sunLight)
+					continue;
+				if (BSLightingShaderProperty_IsLightAffectingSurface(shaderProperty, e.Light)) {
+					lights[addedLightCount++] = e.Light;
+					*shadowLightCount = *shadowLightCount + 1;
+				}
+			}
+		}
+		ctx.Rax = addedLightCount;
+	}
 	static bool HookEx_RenderShadowLights()
 	{
 		// 1412F9F76
@@ -2117,10 +2676,16 @@ private:
 			RE::BSGraphics::Renderer::GetDrawStereo() = false;
 		}
 
+#ifdef L_MEASURE_PERFORMANCE
+		g_perf.beginLight(nullptr, 1);
+#endif
+
+		g_budget.Begin(1);
+
 		std::uint32_t tmp = 0;
 
 		for (int i = 0; i < settings::iCSDebugLightCount; i++) {
-			c_light_entry* e = &g_lights.Lights[i];
+			c_light_entry* e = &g_lightsAll.Lights[i];
 			if (!e->Light || !e->RedrawFrame)
 				continue;
 
@@ -2130,8 +2695,22 @@ private:
 				logs::info("light[{}]->Render({})", i, tmp);
 #endif
 
+#ifdef L_MEASURE_PERFORMANCE
+			g_perf.beginLight(e->Light, 1);
+#endif
+			g_budget.BeginLight(e->Light, 1);
 			e->Light->Render(tmp);
+			g_budget.EndLight(e->Light, 1);
+#ifdef L_MEASURE_PERFORMANCE
+			g_perf.endLight(e->Light, 1);
+#endif
 		}
+
+		g_budget.End(1);
+
+#ifdef L_MEASURE_PERFORMANCE
+		g_perf.endLight(nullptr, 1);
+#endif
 
 		if (REL::Module::IsVR())
 			RE::BSGraphics::Renderer::GetDrawStereo() = vrSavedStereo;
@@ -2201,7 +2780,7 @@ private:
 	static int32_t GetBufferIndexForLight(RE::BSShadowLight* light)
 	{
 		for (int i = 0; i < settings::iCSDebugLightCount; i++) {
-			if (g_lights.Lights[i].Light == light)
+			if (g_lightsAll.Lights[i].Light == light)
 				return i;
 		}
 
@@ -2471,12 +3050,12 @@ private:
 		int32_t subIndex = GetCurrentDepthTargetSubIndex();
 
 		if (targetType == 4) {
-			if (data->readOnlyDepth)
+			/*if (data->readOnlyDepth)
 				ctx.Rbx = (DWORD64)RE::BSGraphics::Renderer::GetSingleton()->GetDepthStencilData().depthStencils[targetType].readOnlyViews[subIndex];
 			else
 				ctx.Rbx = (DWORD64)RE::BSGraphics::Renderer::GetSingleton()->GetDepthStencilData().depthStencils[targetType].views[subIndex];
 
-			DWORD64 prev = ctx.Rbx;
+			DWORD64 prev = ctx.Rbx;*/
 
 			if (data->readOnlyDepth)
 				ctx.Rbx = (DWORD64)g_readOnlyDepthBuffer[subIndex];
@@ -2508,11 +3087,12 @@ private:
 
 		DWORD64 result;
 		if (targetType == 4) {
-			if (isReadOnly)
+			/*if (isReadOnly)
 				result = (DWORD64)RE::BSGraphics::Renderer::GetSingleton()->GetDepthStencilData().depthStencils[targetType].readOnlyViews[subIndex];
 			else
 				result = (DWORD64)RE::BSGraphics::Renderer::GetSingleton()->GetDepthStencilData().depthStencils[targetType].views[subIndex];
 
+			if (isReadOnly)*/
 			if (isReadOnly)
 				result = (DWORD64)g_readOnlyDepthBuffer[subIndex];
 			else
@@ -2574,7 +3154,7 @@ private:
 	static bool HookEx_UseMoreDepthBuffers()
 	{
 		// Allow using more than 4 depth buffers for lights
-		if (settings::iCSDebugLightCount > 4) {
+		/*if (settings::iCSDebugLightCount > 4) {
 			// SE 141E10538 / VR 141ED62F0; depth buffer count mask used identically in VR
 			static _addr addr[] = {
 				_addr(513748, 0, "0F 00 00 00"),
@@ -2590,7 +3170,7 @@ private:
 			newMask--;
 			if (!MemoryHelper::WriteUInt32(a, (uint32_t)newMask))
 				return false;
-		}
+		}*/
 
 		return true;
 	}
@@ -2729,6 +3309,59 @@ private:
 
 		HookHelper::WriteAbsoluteJump(cave, reinterpret_cast<void*>(&CalculateActiveShadowCasterLights_CS));
 		HookHelper::WriteRelJump(a, cave);
+
+		// Called when a light accumulates a surface
+		/*{
+			// 1412E15A7
+			static _addr addr[] = {
+				_addr(99923, 0x5A7 - 0x4E0, "81 FA FF FF 00 00"), // 5BC - 5A7 = 15
+				_addr(106567, 0x20A - 0x140, "41 81 F8 FF FF 00 00"), // 220 - 20a = 16
+			};
+
+			void* a = get_addr(addr);
+			if (!a)
+				return false;
+
+			int sz = GAME_VER == 0 ? 0x15 : 0x16;
+			if (!HookHelper::WriteHook(a, sz, 0, _HookEx_OnAccumulatingLight))
+				return false;
+		}*/
+
+		// Ctor for BSShaderPropertyLightData, need to set our extra field to 0
+		/*{
+			// 1412DC5EA
+			static _addr addr[] = {
+				_addr(99854, 0x5EA - 0x4C0, "89 77 1C 40 88 77 20"),
+				_addr(106499, 0xD4A - 0xC20, "89 77 1C 40 88 77 20"), // 1414ACD4A
+			};
+
+			void* a = get_addr(addr);
+			if (!a)
+				return false;
+
+			if (!HookHelper::WriteHook(a, 7, 7, _HookEx_BSLightingShaderProperty_ctor))
+				return false;
+		}*/
+
+		// Calculate which lights to pick for surface
+		{
+			// 1413281E0
+			static _addr addr[] = {
+				_addr(100997, 0, "4C 89 4C 24 20"),
+				_addr(107784, 0, "4C 89 4C 24 20"),
+			};
+
+			void* a = get_addr(addr);
+			if (!a)
+				return false;
+
+			if (!HookHelper::WriteHook(a, 5, 0, _HookEx_CalculateActiveLightsForSurface))
+				return false;
+
+			// ret
+			if (!MemoryHelper::WriteByte(MemoryHelper::AddPointer(a, 5), 0xC3))
+				return false;
+		}
 
 		return true;
 	}

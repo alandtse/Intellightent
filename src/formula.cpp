@@ -38,6 +38,7 @@ void initFormulaStatic()
 	g_symbols.add_variable("lightneverfades", _params[kFormulaParam_LightNeverFades]);
 	g_symbols.add_variable("lightportalstrict", _params[kFormulaParam_LightPortalStrict]);
 	g_symbols.add_variable("lightns", _params[kFormulaParam_LightNS]);
+	g_symbols.add_variable("lightconverted", _params[kFormulaParam_LightConverted]);
 	g_symbols.add_variable("camerax", _params[kFormulaParam_CameraX]);
 	g_symbols.add_variable("cameray", _params[kFormulaParam_CameraY]);
 	g_symbols.add_variable("isinterior", _params[kFormulaParam_IsInterior]);
