@@ -2682,9 +2682,8 @@ private:
 			RE::BSLight* l = lightData->lights[i];
 			if (!l || l == sunLight)
 				continue;
-			std::int32_t typeField = *(std::int32_t*)((char*)l + 0x5c);
-			std::int64_t niLight = *(std::int64_t*)((char*)l + 0x48);
-			if (niLight && (typeField == 0xff || (*(std::uint8_t*)(niLight + 0x10c) & 1)))
+			RE::NiLight* niLight = l->light.get();
+			if (niLight && (l->frustrumCull == 0xffu || niLight->GetFlags().any(RE::NiAVObject::Flag::kHidden)))
 				continue;
 			lights[addedLightCount++] = l;
 		}
