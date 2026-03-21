@@ -199,7 +199,7 @@ private:
 	int64_t _internalTime{ 0 };
 
 public:
-	void BeginStep(int32_t step)
+	void BeginStep(int32_t /*step*/)
 	{
 		_internalTime = GetPerfCounter();
 	}
@@ -249,7 +249,7 @@ struct LightBudgetHelper
 		}
 	}
 
-	void End(int32_t step)
+	void End(int32_t /*step*/)
 	{
 	}
 
@@ -287,8 +287,6 @@ struct LightBudgetHelper
 	int32_t GetBudget(RE::BSShadowLight* l)
 	{
 		uint64_t key = (uint64_t)l;
-
-		LightBudgetEntry* e = nullptr;
 
 		auto itr2 = _map.find(key);
 		if (itr2 == _map.end() || itr2->second->TrackedCount == 0) {
@@ -3062,7 +3060,7 @@ private:
 		}
 	}
 
-	static void _HookEx_DeleteDepthBuffers_AE(CONTEXT& ctx)
+	static void _HookEx_DeleteDepthBuffers_AE(CONTEXT& /*ctx*/)
 	{
 		for (int i = 8; i < settings::iCSDebugLightCount; i++) {
 			if (g_normalDepthBuffer[i]) {
@@ -3400,20 +3398,20 @@ private:
 		// Calculate which lights to pick for surface
 		{
 			// 1413281E0
-			static _addr addr[] = {
+			static _addr addr2[] = {
 				_addr(100997, 0, "4C 89 4C 24 20"),
 				_addr(107784, 0, "4C 89 4C 24 20"),
 			};
 
-			void* a = get_addr(addr);
-			if (!a)
+			void* a2 = get_addr(addr2);
+			if (!a2)
 				return false;
 
-			if (!HookHelper::WriteHook(a, 5, 0, _HookEx_CalculateActiveLightsForSurface))
+			if (!HookHelper::WriteHook(a2, 5, 0, _HookEx_CalculateActiveLightsForSurface))
 				return false;
 
 			// ret
-			if (!MemoryHelper::WriteByte(MemoryHelper::AddPointer(a, 5), 0xC3))
+			if (!MemoryHelper::WriteByte(MemoryHelper::AddPointer(a2, 5), 0xC3))
 				return false;
 		}
 
