@@ -2600,16 +2600,17 @@ private:
 		// SE: CalculateActiveNonShadowCasterLights @ ID 100997, 10 args
 		// VR: CalculateActiveNonShadowCasterLights @ 0x141354d20, 11 args (extra char a11 @ RSP+0x58, unused)
 		// Verified via Ghidra: VR IsValidLight (ID 98902) @ 0x1412ca950 - same signature as SE
-		[[maybe_unused]] RE::BSShaderPropertyLightData* lightData = (RE::BSShaderPropertyLightData*)ctx.Rcx;                   // a1
-		RE::BSLight**                                   lights = (RE::BSLight**)ctx.Rdx;                                       // a2
-		int                                             maxCount = (int)ctx.R8;                                                // a3
-		int*                                            shadowLightCount = (int*)ctx.R9;                                       // a4
-		RE::ShadowSceneNode*                            shadowSceneNode = *((RE::ShadowSceneNode**)(ctx.Rsp + 0x28));          // a5
-		RE::BSLightingShaderProperty*                   shaderProperty = *((RE::BSLightingShaderProperty**)(ctx.Rsp + 0x30));  // a6
-		bool                                            addShadowLights = *((bool*)(ctx.Rsp + 0x38));                          // a7
-		bool*                                           useShadowSun = *((bool**)(ctx.Rsp + 0x40));                            // a8
-		// a9 (isFirstPersonMesh @ RSP+0x48) and a10 (firstPersonLightMask @ RSP+0x50) unused
-		RE::BSLight* sunLight;
+		RE::BSShaderPropertyLightData* lightData = (RE::BSShaderPropertyLightData*)ctx.Rcx;                   // a1
+		RE::BSLight**                  lights = (RE::BSLight**)ctx.Rdx;                                       // a2
+		int                            maxCount = (int)ctx.R8;                                                // a3
+		int*                           shadowLightCount = (int*)ctx.R9;                                       // a4
+		RE::ShadowSceneNode*           shadowSceneNode = *((RE::ShadowSceneNode**)(ctx.Rsp + 0x28));          // a5
+		RE::BSLightingShaderProperty*  shaderProperty = *((RE::BSLightingShaderProperty**)(ctx.Rsp + 0x30));  // a6
+		bool                           addShadowLights = *((bool*)(ctx.Rsp + 0x38));                          // a7
+		bool*                          useShadowSun = *((bool**)(ctx.Rsp + 0x40));                            // a8
+		bool                           isFirstPerson = *((bool*)(ctx.Rsp + 0x48));                            // a9
+		std::uint32_t                  fpMask = *((std::uint32_t*)(ctx.Rsp + 0x50));                          // a10
+		RE::BSLight*                   sunLight;
 		if (*useShadowSun)
 			sunLight = shadowSceneNode->GetRuntimeData().sunShadowDirLight;
 		else
@@ -2619,14 +2620,55 @@ private:
 		lights[0] = sunLight;
 		*shadowLightCount = 0;
 		int addedLightCount = 1;
+#ifdef ENABLE_SKYRIM_VR
+		// VR a11 @ RSP+0x58: if non-zero, skip light accumulation (vanilla behavior)
+		if (REL::Module::IsVR() && *(char*)(ctx.Rsp + 0x58) != 0) {
+			ctx.Rax = addedLightCount;
+			return;
+		}
+#endif
 		// Add shadow caster lights from our extended pool.
 		// The original uses lightData->unk1C (accumulated-light bitmask) to skip lights that
 		// haven't touched this surface, but we don't populate that mask in CS mode.
 		// Fall back to IsValidLight (the same check the original does after the mask).
 		if (addShadowLights) {
+			auto&        shadowCasters = shadowSceneNode->GetRuntimeData().shadowCasterLights;
+			RE::BSLight* prevShadow = nullptr;
+			// Step 1: vanilla shadow lights gated by activeLightMask (and first-person mask).
+			// Uses the current scene's shadow caster pool, correctly handling menu/special lights.
+			for (std::uint32_t slot = 0; slot < shadowCasters.size() && addedLightCount < maxCount; slot++) {
+				std::uint32_t bit = 1u << slot;
+				if (!((isFirstPerson && (fpMask & bit)) || (lightData->activeLightMask & bit)))
+					continue;
+				RE::BSLight* sl = (RE::BSLight*)shadowCasters[slot];
+				if (!sl || sl == prevShadow || sl == sunLight)
+					continue;
+				if (BSLightingShaderProperty_IsLightAffectingSurface(shaderProperty, sl)) {
+					lights[addedLightCount++] = sl;
+					*shadowLightCount = *shadowLightCount + 1;
+					prevShadow = sl;
+				}
+			}
+			// Step 2: extended g_lights not already covered by vanilla's activeLightMask slots.
+			// Only add lights present in this scene's shadowCasterLights pool
+			// (prevents world shadow lights from bleeding into menu/special scenes).
 			for (int i = 0; i < settings::iCSDebugLightCount && addedLightCount < maxCount; i++) {
 				auto& e = g_lightsAll.Lights[i];
 				if (!e.Light || e.Light == sunLight)
+					continue;
+				bool inScene = false;
+				for (std::uint32_t s = 0; s < shadowCasters.size() && !inScene; s++) {
+					if ((RE::BSLight*)shadowCasters[s] == e.Light)
+						inScene = true;
+				}
+				if (!inScene)
+					continue;
+				bool alreadyAdded = false;
+				for (int j = 1; j < addedLightCount && !alreadyAdded; j++) {
+					if (lights[j] == e.Light)
+						alreadyAdded = true;
+				}
+				if (alreadyAdded)
 					continue;
 				if (BSLightingShaderProperty_IsLightAffectingSurface(shaderProperty, e.Light)) {
 					lights[addedLightCount++] = e.Light;
@@ -2634,8 +2676,21 @@ private:
 				}
 			}
 		}
+		// Include non-shadow-caster lights from lightData->lights[] (per-surface accumulation list).
+		// Use vanilla field checks: skip parabolic shadow-casters (frustrumCull==0xff) and disabled NiLights.
+		for (std::uint32_t i = 0; i < lightData->lights.size() && addedLightCount < maxCount; i++) {
+			RE::BSLight* l = lightData->lights[i];
+			if (!l || l == sunLight)
+				continue;
+			std::int32_t typeField = *(std::int32_t*)((char*)l + 0x5c);
+			std::int64_t niLight = *(std::int64_t*)((char*)l + 0x48);
+			if (niLight && (typeField == 0xff || (*(std::uint8_t*)(niLight + 0x10c) & 1)))
+				continue;
+			lights[addedLightCount++] = l;
+		}
 		ctx.Rax = addedLightCount;
 	}
+
 	static bool HookEx_RenderShadowLights()
 	{
 		// 1412F9F76
