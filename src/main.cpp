@@ -6,6 +6,8 @@
 //#define L_MEASURE_PERFORMANCE
 //#define USE_ACCUM_SET
 
+std::set<uint64_t> g_stealthDetection_tmp;
+
 int64_t GetPerfCounter()
 {
 	LARGE_INTEGER counter;
@@ -614,8 +616,9 @@ struct c_light_entry
 	double             RedrawScore{ 0.0 };
 	int32_t            LastDrawnFrame{ -1 };
 	bool               RedrawFrame{ false };
-	int32_t            Index{ -1 };
-	int32_t            DrawIndex{ -1 };
+	//bool AffectPlayer{ false };
+	int32_t Index{ -1 };
+	int32_t DrawIndex{ -1 };
 #ifdef USE_ACCUM_SET
 	std::set<uint64_t>* Accum{ nullptr };
 #endif
@@ -624,6 +627,7 @@ struct c_light_entry
 	{
 		Light = nullptr;
 		LastDrawnFrame = -1;
+		//AffectPlayer = false;
 #ifdef USE_ACCUM_SET
 		Accum->clear();
 #endif
@@ -1858,8 +1862,15 @@ private:
 			}
 
 			logs::info("Frame == [{}] ==", GetCurrentGameFrameCounter());
-			for (int i = 0; i < g_lightsAll.Size; i++)
-				logs::info("> Light[{}]: {:X}, redrawing: {}", i, (int64_t)g_lightsAll.Lights[i].Light, g_lightsAll.Lights[i].RedrawFrame ? 1 : 0);
+			for (int i = 0; i < g_lightsAll.Size; i++) {
+				int sii = -1;
+				int lii = -1;
+				if (g_lightsAll.Lights[i].Light) {
+					sii = (int)g_lightsAll.Lights[i].Light->GetRuntimeData().shadowmapDescriptors[0].shadowmapIndex;
+					lii = (int)g_lightsAll.Lights[i].Light->GetRuntimeData().shadowLightIndex;
+				}
+				logs::info("> Light[{}]: {:X}, redrawing: {}, lightIndex: {}, shadowMapIndex: {}", i, (int64_t)g_lightsAll.Lights[i].Light, g_lightsAll.Lights[i].RedrawFrame ? 1 : 0, lii, sii);
+			}
 		}
 #endif
 
@@ -2500,7 +2511,136 @@ private:
 		if (!HookEx_SetupRenderPass())
 			return false;
 
+		if (!HookEx_FixStealthDetection())
+			return false;
+
 		return true;
+	}
+
+	static bool HookEx_FixStealthDetection()
+	{
+		// Fix GetLightLevel calculation since it uses some of the shadow light system and it would not work with our replaced one
+
+		// Update which shadow lights may be affecting the player
+		{
+			// 140680185 - begin
+			{
+				static _addr addr[] = {
+					_addr(38900, 0x185 - 0x050, "41 83 CE FF 33 C0"),
+					_addr(39946, 0x847 - 0x710, "41 BE FF FF FF FF"),
+				};
+
+				void* a = get_addr(addr);
+				if (!a)
+					return false;
+
+				if (!HookHelper::WriteHook(a, 6, 6, _HookEx_UpdateLightLevelPlayer))
+					return false;
+			}
+
+			// 140680194 - skip normal calculation since we are replacing it with our own
+			{
+				static _addr addr[] = {
+					_addr(38900, 0x194 - 0x050, "73 3F"),
+					_addr(39946, 0x856 - 0x710, "73 47"),
+				};
+
+				void* a = get_addr(addr);
+				if (!a)
+					return false;
+
+				if (!MemoryHelper::WriteByte(a, 0xEB))
+					return false;
+			}
+
+			// 1412D3648 - check whether this light was calculated to possibly affect player
+			{
+				static _addr addr[] = {
+					_addr(99725, 0x648 - 0x560, "41 85 F6 74 16"),
+					_addr(106362, 0xB49 - 0xA60, "41 85 EE 74 16"),
+				};
+
+				void* a = get_addr(addr);
+				if (!a)
+					return false;
+
+				if (!HookHelper::WriteHook(a, 5, 0, _HookEx_CheckLightLevelPlayer))
+					return false;
+			}
+		}
+
+		return true;
+	}
+
+	static void _HookEx_CheckLightLevelPlayer(CONTEXT& ctx)
+	{
+		RE::BSShadowLight* light = (RE::BSShadowLight*)ctx.Rcx;
+
+		bool has = g_stealthDetection_tmp.find((uint64_t)light) != g_stealthDetection_tmp.end();
+		/*for (int i = 0; i < g_lightsAll.Size; i++)
+		{
+			auto& l = g_lightsAll.Lights[i];
+			if (l.Light != light)
+				continue;
+
+			has = l.AffectPlayer;
+			break;
+		}*/
+
+		if (!has)
+			ctx.Rip += 0x16;
+	}
+
+	static void* GetUnkDetectionGlobal()
+	{
+		// 142F6DB98 - some struct with size 80 (dec)
+		static REL::RelocationID uid(518074, 404596);
+		uintptr_t                addr = uid.address();
+		return *((void**)addr);
+	}
+
+	static bool IsLightAffectingActor(void* /* a1*/, RE::BSShadowLight* a2, RE::Actor* a3, RE::NiPoint3* a4)
+	{
+		// 14071A380
+		using func_t = decltype(&IsLightAffectingActor);
+		static REL::Relocation<func_t> func{ REL::RelocationID(41661, 42744) };
+		return func(GetUnkDetectionGlobal(), a2, a3, a4);
+	}
+
+	static void _HookEx_UpdateLightLevelPlayer(CONTEXT& ctx)
+	{
+		RE::NiPoint3* a4 = (RE::NiPoint3*)(ctx.Rbp - 33);
+		auto          a3 = RE::PlayerCharacter::GetSingleton();
+
+		g_stealthDetection_tmp.clear();
+		auto shadowScene = GetShadowSceneNode();
+		if (shadowScene) {
+			for (auto itr = shadowScene->GetRuntimeData().activeShadowLights.begin(); itr != shadowScene->GetRuntimeData().activeShadowLights.end(); itr++) {
+				auto l = itr->get();
+				if (!l)
+					continue;
+
+				auto ni = l->light.get();
+				if (!ni || ni->GetFlags().any(RE::NiAVObject::Flag::kHidden))  // game doesn't even check this but we probably should
+					continue;
+
+				if (IsLightAffectingActor(nullptr, l, a3, a4))
+					g_stealthDetection_tmp.insert((uint64_t)l);
+			}
+		}
+
+		/*for (int i = 0; i < g_lightsAll.Size; i++)
+		{
+			auto& l = g_lightsAll.Lights[i];
+			if (!l.Light)
+				continue;
+
+			// This is done elsewhere
+			if (i == 0 && g_lightsAll.Sun)
+				continue;
+
+			l.AffectPlayer = IsLightAffectingActor(nullptr, l.Light, a3, a4);
+		}*/
 	}
 
 	static bool HookEx_SetupRenderPass()
