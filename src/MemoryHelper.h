@@ -1388,7 +1388,7 @@ public:
 			/* [12] */ 0x74, 0x08,                                                  // je continue
 			/* [14] */ 0x48, 0xC7, 0xC0, 0x01, 0x00, 0x00, 0x00,                    // mov rax, 1
 			/* [1b] */ 0x50,                                                        // push rax
-																					/* [1c] continue: */
+			                                                                        /* [1c] continue: */
 			/* [1c] */ 0x48, 0x81, 0xEC, 0x99, 0x99, 0x00, 0x00,                    // sub rsp, sizeof(CONTEXT)
 			/* [23] */ 0x48, 0x89, 0xE1,                                            // mov rcx, rsp
 			/* [26] */ 0x48, 0xB8, 0x77, 0x77, 0x77, 0x77, 0x77, 0x77, 0x77, 0x77,  // movabs rax, RtlCaptureContext
